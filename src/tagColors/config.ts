@@ -43,7 +43,7 @@ export const DEFAULT_TAG_COLORS: TagColor[] = [
 ];
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
-const TAG = /^[^\s]{1,64}$/;
+const TAG = /^.{1,64}$/;
 
 export function isHexColor(v: unknown): v is string {
   return typeof v === "string" && HEX.test(v);

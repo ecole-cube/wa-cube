@@ -24,6 +24,8 @@ export const ZONES: Zone[] = [
   { name: "Staff", x: 346, y: 1240, w: 462, h: 722 },
   { name: "Showroom", x: 119, y: 3497, w: 1470, h: 440 },
   { name: "Événement", x: 4864, y: 2776, w: 514, h: 1040 },
+  // Parvis devant l'arche "Bienvenue" jusqu'au point d'arrivée (spawn, y ≈ 4416).
+  { name: "Entrée", x: 2800, y: 3680, w: 800, h: 768 },
   { name: "Campus", x: 1408, y: 352, w: 4128, h: 2432 },
 ];
 
