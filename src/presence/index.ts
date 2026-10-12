@@ -3,25 +3,112 @@
 /* =========================================================
    Présence (script de la map)
    ---------------------------------------------------------
-   - répond "je suis là" quand la page admin demande qui est présent ;
+   - rejoint l'espace de présence : le serveur WorkAdventure en tient la liste
+     (nom, tags, carte), la page admin la reçoit en direct, sans interroger personne ;
+   - répond avec sa position quand un admin la demande à CETTE personne ;
    - reçoit les demandes d'un admin : "rejoins-moi", ou un message.
    Rien n'est forcé : la personne voit une invitation et choisit.
+
+   Les notifications s'affichent en haut à droite, dans une petite page
+   Lovable (/notification) ouverte comme "site d'interface" : elle reste au
+   premier plan, y compris devant un partage d'écran. Quand la personne clique,
+   la page renvoie un accusé de réception à l'admin (admin:ack), qui voit
+   alors "X a lu ton message" de la même façon.
    ========================================================= */
 
 import { currentTagColors } from "../tagColors";
 import { colorForTags } from "../tagColors/config";
 import { zoneAt } from "../zones";
 import {
+  AckAction,
+  AckKind,
+  AdminAck,
   PRESENCE_EVENTS,
+  PRESENCE_SPACE,
+  PRESENCE_SPACE_FILTER,
   PRESENCE_VERSION,
   PresenceInfo,
+  ackText,
+  isAdminAck,
   isAdminMessage,
   isAdminSummon,
+  isHelloForMe,
   roleFromTags,
 } from "./protocol";
 
 const connectedAt = Date.now();
 
+/** Page de notification hébergée sur Lovable (même domaine que Plan & FAQ). */
+const NOTIFICATION_URL = "https://campus-entry-cube.lovable.app/notification";
+const NOTIFICATION_WIDTH = "380px";
+const NOTIFICATION_AUTO_CLOSE_MS = 60_000;
+const ACK_AUTO_CLOSE_MS = 8_000;
+
+type UIWebsite = Awaited<ReturnType<typeof WA.ui.website.open>>;
+let currentNotification: UIWebsite | null = null;
+
+interface NotificationData {
+  kind: AckKind | "ack";
+  id: string;
+  fromName: string;
+  fromUuid?: string;
+  text?: string;
+  zone?: string | null;
+  x?: number;
+  y?: number;
+}
+
+/**
+ * Ouvre la notification en haut à droite. Les données passent dans le fragment (#),
+ * qui n'est jamais envoyé au serveur : le texte d'un message ne finit pas dans des logs.
+ * Une seule notification à la fois : la nouvelle remplace l'ancienne.
+ */
+async function showNotification(n: NotificationData, autoCloseMs: number): Promise<void> {
+  const params = new URLSearchParams({
+    kind: n.kind,
+    id: n.id,
+    from: n.fromName,
+    fromUuid: n.fromUuid ?? "",
+    text: (n.text ?? "").slice(0, 280),
+    zone: n.zone ?? "",
+    x: String(Math.round(n.x ?? 0)),
+    y: String(Math.round(n.y ?? 0)),
+  });
+  await currentNotification?.close().catch(() => undefined);
+  currentNotification = null;
+  const site = await WA.ui.website.open({
+    url: `${NOTIFICATION_URL}#${params.toString()}`,
+    allowApi: true,
+    visible: true,
+    position: { vertical: "top", horizontal: "right" },
+    size: { width: NOTIFICATION_WIDTH, height: n.kind === "ack" ? "96px" : "220px" },
+    margin: { top: "16px", right: "16px" },
+  });
+  currentNotification = site;
+  setTimeout(() => {
+    site.close().catch(() => undefined);
+    if (currentNotification === site) currentNotification = null;
+  }, autoCloseMs);
+}
+
+function newId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Accusé de réception envoyé à l'admin (utilisé par les solutions de repli ci-dessous). */
+function sendAck(to: string | undefined, id: string, kind: AckKind, action: AckAction): void {
+  if (!to) return;
+  const ack: AdminAck = {
+    v: PRESENCE_VERSION,
+    to,
+    id,
+    kind,
+    action,
+    fromName: WA.player.name,
+    fromUuid: WA.player.uuid ?? "",
+  };
+  WA.event.broadcast(PRESENCE_EVENTS.ack, ack).catch((e) => console.warn("[presence] accusé non envoyé", e));
+}
 async function myInfo(): Promise<PresenceInfo> {
   const pos = await WA.player.getPosition();
   const tags = WA.player.tags ?? [];
@@ -47,39 +134,69 @@ function isForMe(to: string): boolean {
 
 /** À appeler une fois, après WA.onInit(). */
 export function initPresence(): void {
-  WA.event.on(PRESENCE_EVENTS.hello).subscribe(() => {
-    // délai aléatoire pour que tout le monde ne réponde pas à la même milliseconde
-    setTimeout(() => {
-      myInfo()
-        .then((info) => WA.event.broadcast(PRESENCE_EVENTS.here, info))
-        .catch((e) => console.warn("[presence]", e));
-    }, Math.random() * 1200);
+  // Apparaître dans la liste native des connectés (aucun trafic ensuite).
+  WA.spaces
+    .joinSpace(PRESENCE_SPACE, PRESENCE_SPACE_FILTER, [])
+    .catch((e) => console.warn("[presence] espace indisponible", e));
+
+  WA.event.on(PRESENCE_EVENTS.hello).subscribe((ev) => {
+    // Seule la personne interrogée répond : un seul message au lieu d'une rafale.
+    if (!isHelloForMe(ev.data, WA.player.uuid ?? "")) return;
+    myInfo()
+      .then((info) => WA.event.broadcast(PRESENCE_EVENTS.here, info))
+      .catch((e) => console.warn("[presence]", e));
   });
 
   WA.event.on(PRESENCE_EVENTS.summon).subscribe((ev) => {
     if (!isAdminSummon(ev.data) || !isForMe(ev.data.to)) return;
     const s = ev.data;
-    const where = s.zone ? ` (${s.zone})` : "";
-    const msg = WA.ui.displayActionMessage({
-      message: `${s.fromName} te demande de le rejoindre${where}. Appuie pour y aller.`,
-      type: "message",
-      callback: () => {
-        WA.player.teleport(s.x, s.y + 32).catch((e) => console.warn(e));
-      },
+    const id = s.id ?? newId();
+    showNotification(
+      { kind: "summon", id, fromName: s.fromName, fromUuid: s.fromUuid, zone: s.zone, x: s.x, y: s.y },
+      NOTIFICATION_AUTO_CLOSE_MS,
+    ).catch((e) => {
+      // Repli : l'ancien message en bas de l'écran (espace pour accepter).
+      console.warn("[presence] notification indisponible", e);
+      const where = s.zone ? ` (${s.zone})` : "";
+      const msg = WA.ui.displayActionMessage({
+        message: `${s.fromName} te demande de le rejoindre${where}. Appuie sur espace pour y aller.`,
+        type: "message",
+        callback: () => {
+          sendAck(s.fromUuid, id, "summon", "accepted");
+          WA.player.teleport(s.x, s.y + 32).catch((err) => console.warn(err));
+        },
+      });
+      setTimeout(() => msg.remove().catch(() => undefined), NOTIFICATION_AUTO_CLOSE_MS);
     });
-    setTimeout(() => msg.remove().catch(() => undefined), 30_000);
   });
 
   WA.event.on(PRESENCE_EVENTS.message).subscribe((ev) => {
     if (!isAdminMessage(ev.data) || !isForMe(ev.data.to)) return;
     const m = ev.data;
-    WA.ui.banner.openBanner({
-      id: `admin-message-${Date.now()}`,
-      text: `${m.fromName} : ${m.text.slice(0, 280)}`,
-      bgColor: "#6D1FFF",
-      textColor: "#FFFFFF",
-      closable: true,
-      timeToClose: 30_000,
+    showNotification(
+      { kind: "message", id: m.id ?? newId(), fromName: m.fromName, fromUuid: m.fromUuid, text: m.text },
+      NOTIFICATION_AUTO_CLOSE_MS,
+    ).catch((e) => {
+      // Repli : bandeau en haut (pas d'accusé possible, il n'a pas de clic).
+      console.warn("[presence] notification indisponible", e);
+      WA.ui.banner.openBanner({
+        id: `admin-message-${Date.now()}`,
+        text: `${m.fromName} : ${m.text.slice(0, 280)}`,
+        bgColor: "#6D1FFF",
+        textColor: "#FFFFFF",
+        closable: true,
+        timeToClose: NOTIFICATION_AUTO_CLOSE_MS,
+      });
     });
+  });
+
+  // Côté admin : la personne a cliqué, on affiche l'accusé au même endroit.
+  WA.event.on(PRESENCE_EVENTS.ack).subscribe((ev) => {
+    if (!isAdminAck(ev.data) || !isForMe(ev.data.to)) return;
+    const a = ev.data;
+    showNotification(
+      { kind: "ack", id: a.id, fromName: a.fromName, fromUuid: a.fromUuid, text: ackText(a) },
+      ACK_AUTO_CLOSE_MS,
+    ).catch((e) => console.warn("[presence] accusé non affiché", e));
   });
 }
