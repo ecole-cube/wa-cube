@@ -157,8 +157,11 @@ export interface AdminMessage {
 }
 
 export type AckKind = "message" | "summon";
-/** read : message lu. accepted : la personne vient. declined : pas maintenant. */
-export type AckAction = "read" | "accepted" | "declined";
+/**
+ * read : message lu. accepted : la personne vient. declined : pas maintenant.
+ * denied : la personne n'a pas les droits pour aller à cet endroit.
+ */
+export type AckAction = "read" | "accepted" | "declined" | "denied";
 
 /** Réponse envoyée à l'admin quand la personne clique sur la notification. */
 export interface AdminAck {
@@ -201,12 +204,13 @@ export function isAdminAck(v: unknown): v is AdminAck {
     typeof a.id === "string" &&
     typeof a.fromName === "string" &&
     (a.kind === "message" || a.kind === "summon") &&
-    (a.action === "read" || a.action === "accepted" || a.action === "declined")
+    (a.action === "read" || a.action === "accepted" || a.action === "declined" || a.action === "denied")
   );
 }
 
 /** Phrase affichée à l'admin quand la personne a répondu. */
 export function ackText(a: Pick<AdminAck, "kind" | "action" | "fromName">): string {
+  if (a.action === "denied") return `${a.fromName} n'a pas accès à cet endroit.`;
   if (a.action === "declined") return `${a.fromName} ne peut pas te rejoindre pour l'instant.`;
   if (a.action === "accepted") return `${a.fromName} te rejoint.`;
   return `${a.fromName} a lu ton message.`;

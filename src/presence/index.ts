@@ -24,7 +24,7 @@
 
 import { currentTagColors } from "../tagColors";
 import { colorForTags } from "../tagColors/config";
-import { zoneAt } from "../zones";
+import { canEnterAt, zoneAt } from "../zones";
 import {
   ADMIN_COMMAND_MAX_AGE_MS,
   ADMIN_COMMAND_VARIABLE,
@@ -216,6 +216,11 @@ export function initPresence(): void {
         message: `${s.fromName} te demande de le rejoindre${where}. Appuie sur espace pour y aller.`,
         type: "message",
         callback: () => {
+          // Jamais plus loin que ce que les droits de la personne permettent à pied.
+          if (!canEnterAt(WA.player.tags ?? [], s.x, s.y + 32)) {
+            sendAck(s.fromUuid, id, "summon", "denied");
+            return;
+          }
           sendAck(s.fromUuid, id, "summon", "accepted");
           WA.player.teleport(s.x, s.y + 32).catch((err) => console.warn(err));
         },
