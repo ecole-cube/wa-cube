@@ -16,6 +16,12 @@ WA.onInit().then(() => {
     console.info('Scripting API ready');
     console.info('Player tags: ',WA.player.tags)
     const userTags = WA.player.tags;    
+    // Couleur du nom selon la formation : réglable depuis l'onglet Admin
+    // de la page Plan & FAQ (variable de salle "tagColors").
+    // Posée en premier : une erreur plus bas dans ce script ne doit pas
+    // laisser la personne avec un fond gris.
+    initTagColors().catch(e => console.error("[couleurs]", e));
+
     // Liste des tags autorisés à traverser (basée sur votre script)
     // "admin" (admins WorkAdventure) passe partout.
     const authorizedTags = ["premium", "admin"];
@@ -50,10 +56,6 @@ WA.onInit().then(() => {
         showCampus();
         showShowroom();
     });
-
-    // Couleur du nom selon la formation : réglable depuis l'onglet Admin
-    // de la page Plan & FAQ (variable de salle "tagColors").
-    initTagColors().catch(e => console.error("[couleurs]", e));
 
     // Présence : permet à l'onglet Admin de lister les personnes du campus,
     // d'aller vers elles, de les faire venir ou de leur envoyer un message.

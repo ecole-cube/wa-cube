@@ -8,6 +8,11 @@
    joueur. Si elle est vide, on garde les couleurs par défaut.
    Ensuite : chaque modification faite par un admin est appliquée
    tout de suite, sans recharger.
+
+   La couleur est aussi ré-affirmée régulièrement : un appel unique au
+   chargement peut être perdu (reconnexion réseau, appel trop tôt, erreur
+   ailleurs dans le script) et laisse alors un fond gris à la personne
+   jusqu'à son prochain rechargement.
    ========================================================= */
 
 import {
@@ -18,6 +23,11 @@ import {
   hexToRgb,
   parseTagColors,
 } from "./config";
+
+/** Ré-envoie la couleur à intervalle régulier, même si elle n'a pas changé. */
+const REASSERT_EVERY_MS = 30_000;
+/** Premiers rappels rapprochés, au cas où l'appel initial serait ignoré. */
+const EARLY_REASSERT_MS = [2_000, 8_000];
 
 let appliedColor: string | null = null;
 let entriesInUse: TagColor[] = DEFAULT_TAG_COLORS;
@@ -32,10 +42,12 @@ export function currentTagColors(): TagColor[] {
   return entriesInUse;
 }
 
-async function applyMyColor(entries: TagColor[]): Promise<void> {
+async function applyMyColor(entries: TagColor[], force = false): Promise<void> {
   const match = colorForTags(entries, WA.player.tags ?? []);
   const color = match ? match.color : null;
-  if (color === appliedColor) return;
+  if (!force && color === appliedColor) return;
+  // Rien à poser et rien posé : inutile de solliciter le serveur.
+  if (!color && !appliedColor) return;
 
   try {
     if (color) {
@@ -61,6 +73,10 @@ export async function initTagColors(): Promise<void> {
     console.warn("[couleurs] variable de salle indisponible, couleurs par défaut", e);
   }
   await applyMyColor(currentEntries(value));
+
+  const reassert = () => applyMyColor(entriesInUse, true).catch((e) => console.warn(e));
+  EARLY_REASSERT_MS.forEach((ms) => setTimeout(reassert, ms));
+  setInterval(reassert, REASSERT_EVERY_MS);
 
   try {
     WA.state.onVariableChange(TAG_COLORS_VARIABLE).subscribe((next) => {
