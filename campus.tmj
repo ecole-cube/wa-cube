@@ -3670,6 +3670,23 @@
                  "y":0
                 }, 
                 {
+                 "height":32,
+                 "id":38,
+                 "name":"adminCommand",
+                 "properties":[
+                        {
+                         "name":"writableBy",
+                         "type":"string",
+                         "value":"admin"
+                        }],
+                 "rotation":0,
+                 "type":"variable",
+                 "visible":true,
+                 "width":32,
+                 "x":32,
+                 "y":0
+                }, 
+                {
                  "height":1040,
                  "id":20,
                  "name":"zoneEvent",
@@ -5595,7 +5612,7 @@
          "y":0
         }],
  "nextlayerid":93,
- "nextobjectid":38,
+ "nextobjectid":39,
  "orientation":"orthogonal",
  "properties":[
         {

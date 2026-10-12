@@ -16,6 +16,14 @@ export const PRESENCE_VERSION = 1;
 export const PRESENCE_SPACE = "cube-presence";
 export const PRESENCE_SPACE_FILTER = "streaming" as const;
 
+/**
+ * Variable de salle par laquelle un admin envoie une commande de modération.
+ * Déclarée dans campus.tmj avec `writableBy: admin` : c'est le serveur
+ * WorkAdventure qui refuse l'écriture à tout autre compte, donc personne
+ * ne peut déconnecter quelqu'un en imitant un admin.
+ */
+export const ADMIN_COMMAND_VARIABLE = "adminCommand";
+
 export const PRESENCE_EVENTS = {
   /** "Où es-tu ?" : envoyé par la page admin à UNE personne (champ `to`). */
   hello: "presence:hello",
@@ -49,6 +57,68 @@ export interface PresenceInfo {
   y: number;
   /** Heure d'arrivée sur le campus (ms epoch). */
   connectedAt: number;
+  /** Identifiant propre à cet onglet : deux onglets du même compte ont deux sessionId. */
+  sessionId?: string;
+  /** Temps écoulé sans déplacement dans cet onglet (ms). */
+  idleMs?: number;
+}
+
+export type KickReason = "inactive" | "entrance" | "duplicate" | "other";
+
+/** Une session précise (uuid + onglet) : l'autre onglet du même compte n'est pas touché. */
+export interface KickTarget {
+  uuid: string;
+  sessionId: string;
+}
+
+export interface AdminCommand {
+  v: number;
+  /** Identifiant unique : une commande n'est exécutée qu'une fois. */
+  id: string;
+  action: "kick";
+  reason: KickReason;
+  targets: KickTarget[];
+  by: string;
+  /** ms epoch. Une commande de plus de 60 s est ignorée. */
+  at: number;
+}
+
+export const ADMIN_COMMAND_MAX_AGE_MS = 60_000;
+
+/** Lit la valeur de la variable (texte JSON ou objet). Renvoie null si elle est invalide. */
+export function parseAdminCommand(value: unknown): AdminCommand | null {
+  let data: unknown = value;
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+  if (!data || typeof data !== "object") return null;
+  const c = data as Record<string, unknown>;
+  if (c.action !== "kick" || typeof c.id !== "string" || typeof c.at !== "number") return null;
+  if (!Array.isArray(c.targets)) return null;
+  const targets: KickTarget[] = [];
+  for (const t of c.targets) {
+    if (!t || typeof t !== "object") continue;
+    const r = t as Record<string, unknown>;
+    if (typeof r.uuid === "string" && typeof r.sessionId === "string" && r.uuid && r.sessionId) {
+      targets.push({ uuid: r.uuid, sessionId: r.sessionId });
+    }
+  }
+  if (targets.length === 0) return null;
+  const reason: KickReason =
+    c.reason === "inactive" || c.reason === "entrance" || c.reason === "duplicate" ? c.reason : "other";
+  return {
+    v: typeof c.v === "number" ? c.v : 1,
+    id: c.id,
+    action: "kick",
+    reason,
+    targets,
+    by: typeof c.by === "string" ? c.by : "",
+    at: c.at,
+  };
 }
 
 export interface PresenceHello {

@@ -9,6 +9,12 @@
    - reçoit les demandes d'un admin : "rejoins-moi", ou un message.
    Rien n'est forcé : la personne voit une invitation et choisit.
 
+   Modération : un admin peut déconnecter une session précise (inactive, restée
+   à l'entrée, ou ancien onglet d'une double connexion). La commande passe par la
+   variable de salle "adminCommand", inscriptible par les admins seulement
+   (contrôlé par le serveur). La personne arrive sur la page /deconnecte et peut
+   revenir quand elle veut.
+
    Les notifications s'affichent en haut à droite, dans une petite page
    Lovable (/notification) ouverte comme "site d'interface" : elle reste au
    premier plan, y compris devant un partage d'écran. Quand la personne clique,
@@ -20,6 +26,8 @@ import { currentTagColors } from "../tagColors";
 import { colorForTags } from "../tagColors/config";
 import { zoneAt } from "../zones";
 import {
+  ADMIN_COMMAND_MAX_AGE_MS,
+  ADMIN_COMMAND_VARIABLE,
   AckAction,
   AckKind,
   AdminAck,
@@ -33,10 +41,20 @@ import {
   isAdminMessage,
   isAdminSummon,
   isHelloForMe,
+  parseAdminCommand,
   roleFromTags,
 } from "./protocol";
 
 const connectedAt = Date.now();
+/** Propre à cet onglet : sert à viser le bon onglet en cas de double connexion. */
+const sessionId = `${connectedAt.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+/** Dernier déplacement du joueur dans cet onglet. */
+let lastMoveAt = connectedAt;
+
+/** Page affichée à la personne déconnectée par un admin. */
+const LEFT_URL = "https://campus-entry-cube.lovable.app/deconnecte";
+/** Réponses à une demande générale étalées dans le temps, pour ne pas saturer la page admin. */
+const HELLO_JITTER_MS = 1500;
 
 /** Page de notification hébergée sur Lovable (même domaine que Plan & FAQ). */
 const NOTIFICATION_URL = "https://campus-entry-cube.lovable.app/notification";
@@ -125,6 +143,8 @@ async function myInfo(): Promise<PresenceInfo> {
     x: Math.round(pos.x),
     y: Math.round(pos.y),
     connectedAt,
+    sessionId,
+    idleMs: Math.max(0, Date.now() - lastMoveAt),
   };
 }
 
@@ -142,10 +162,44 @@ export function initPresence(): void {
   WA.event.on(PRESENCE_EVENTS.hello).subscribe((ev) => {
     // Seule la personne interrogée répond : un seul message au lieu d'une rafale.
     if (!isHelloForMe(ev.data, WA.player.uuid ?? "")) return;
-    myInfo()
-      .then((info) => WA.event.broadcast(PRESENCE_EVENTS.here, info))
-      .catch((e) => console.warn("[presence]", e));
+    const targeted = !!(ev.data && typeof ev.data === "object" && (ev.data as { to?: unknown }).to);
+    // Demande à une personne : réponse immédiate. Demande générale (analyse admin) : on s'étale.
+    setTimeout(
+      () => {
+        myInfo()
+          .then((info) => WA.event.broadcast(PRESENCE_EVENTS.here, info))
+          .catch((e) => console.warn("[presence]", e));
+      },
+      targeted ? 0 : Math.random() * HELLO_JITTER_MS,
+    );
   });
+
+  // Activité : un déplacement suffit à remettre le compteur d'inactivité à zéro.
+  try {
+    WA.player.onPlayerMove(() => {
+      lastMoveAt = Date.now();
+    });
+  } catch (e) {
+    console.warn("[presence] suivi d'activité indisponible", e);
+  }
+
+  // Commande de modération envoyée par un admin.
+  const done = new Set<string>();
+  try {
+    WA.state.onVariableChange(ADMIN_COMMAND_VARIABLE).subscribe((value) => {
+      const cmd = parseAdminCommand(value);
+      if (!cmd || done.has(cmd.id)) return;
+      done.add(cmd.id);
+      if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
+      const me = WA.player.uuid ?? "";
+      if (!cmd.targets.some((t) => t.uuid === me && t.sessionId === sessionId)) return;
+      const back = WA.room.id.startsWith("/@/") ? `https://play.workadventu.re${WA.room.id}` : "";
+      const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
+      WA.nav.goToPage(url);
+    });
+  } catch (e) {
+    console.warn("[presence] canal de modération indisponible", e);
+  }
 
   WA.event.on(PRESENCE_EVENTS.summon).subscribe((ev) => {
     if (!isAdminSummon(ev.data) || !isForMe(ev.data.to)) return;
