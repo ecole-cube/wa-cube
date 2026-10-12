@@ -3,8 +3,13 @@
 import { bootstrapExtra } from "@workadventure/scripting-api-extra";
 import { closeDialog } from "@workadventure/npc-dialog-box";
 import { startShowroomTutorial } from "./showroomTutorial";
+import { initTagColors } from "./tagColors";
+import { initPresence } from "./presence";
 
 console.info('Script started successfully');
+
+// Page Lovable affichée derrière le bouton "Plan & FAQ"
+const PLAN_URL = "https://campus-entry-cube.lovable.app/plan-aide";
 
 // Waiting for the API to be ready
 WA.onInit().then(() => {
@@ -12,8 +17,9 @@ WA.onInit().then(() => {
     console.info('Player tags: ',WA.player.tags)
     const userTags = WA.player.tags;    
     // Liste des tags autorisés à traverser (basée sur votre script)
-    const authorizedTags = ["premium"];
-    const authorizedTagsEntrance = ["member", "premium"];
+    // "admin" (admins WorkAdventure) passe partout.
+    const authorizedTags = ["premium", "admin"];
+    const authorizedTagsEntrance = ["member", "premium", "admin"];
 
     // Vérifier si l'utilisateur possède au moins un des tags
     const hasAuthorizedTag = authorizedTags.some(tag => userTags.includes(tag));
@@ -45,54 +51,27 @@ WA.onInit().then(() => {
         showShowroom();
     });
 
-    // Équipe encadrante
-    if (userTags.includes("staff")) {
-        WA.player.setOutlineColor(148, 103, 189); // Violet #9467BD
-    } 
-    // Autom & agents IA
-    else if (userTags.includes("autom")) {
-        WA.player.setOutlineColor(31, 119, 180); // Bleu #1F77B4
-    } 
-    // Développement d'app IA
-    else if (userTags.includes("dev")) {
-        WA.player.setOutlineColor(255, 127, 14); // Orange #FF7F0E
-    } 
-    // Chef de projet IA
-    else if (userTags.includes("projet")) {
-        WA.player.setOutlineColor(214, 39, 40); // Rouge #D62728
-    } 
-    // Acquisition organique
-    else if (userTags.includes("seo")) {
-        WA.player.setOutlineColor(227, 119, 194); // Rose #E377C2
-    } 
-    // Acquisition payante
-    else if (userTags.includes("paid")) {
-        WA.player.setOutlineColor(23, 190, 207); // Cyan #17BECF
-    } 
-    // IA générative
-    else if (userTags.includes("iagen")) {
-        WA.player.setOutlineColor(188, 189, 34); // Jaune #BCBD22
-    } 
-    // Product Builder
-    else if (userTags.includes("pbn")) {
-        WA.player.setOutlineColor(44, 160, 44); // Vert #2CA02C
-    } 
-    // Growth Marketer
-    else if (userTags.includes("growth")) {
-        WA.player.setOutlineColor(140, 86, 75); // Marron #8C564B
-    }
+    // Couleur du nom selon la formation : réglable depuis l'onglet Admin
+    // de la page Plan & FAQ (variable de salle "tagColors").
+    initTagColors().catch(e => console.error("[couleurs]", e));
+
+    // Présence : permet à l'onglet Admin de lister les personnes du campus,
+    // d'aller vers elles, de les faire venir ou de leur envoyer un message.
+    initPresence();
 
     WA.ui.actionBar.addButton({
         id: "nav-btn",
-        label: "Plan & Aide",
+        label: "Plan & FAQ",
         bgColor: "#6D1FFF",
         textColor: "#FFFFFF",
         toolTip: "",
         callback: () => {
             WA.ui.modal.openModal({
                 title: "Navigation",
-                src: "https://campus-entry-cube.lovable.app/plan-aide",
-                allow: null,
+                src: PLAN_URL,
+                // micro et caméra : test du micro et liste des périphériques
+                // dans le formulaire de signalement ; presse-papiers : bouton "Copier"
+                allow: "microphone; camera; clipboard-write",
                 allowApi: true,
                 position: "center",
                 closable: true,
