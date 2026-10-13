@@ -62,8 +62,10 @@ WA.onInit().then(() => {
     // d'aller vers elles, de les faire venir ou de leur envoyer un message.
     initPresence();
 
-    // Bouton "Partager" (invitation) de la barre d'actions : masqué pour tout le monde.
-    // Pour le garder aux admins : if (!WA.player.tags.includes("admin")) { ... }
+    // Boutons "Partager" (invitation) : celui de la barre d'actions ET celui de la liste des
+    // personnes du panneau de gauche dépendent du même réglage de WorkAdventure, ils
+    // disparaissent donc ensemble. L'invitation passe par le bouton "Inviter" de la
+    // page Plan & FAQ (staff et admin).
     try {
         WA.controls.disableInviteButton();
     } catch (e) {
