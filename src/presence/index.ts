@@ -194,7 +194,8 @@ export function initPresence(): void {
       const me = WA.player.uuid ?? "";
       if (!cmd.targets.some((t) => t.uuid === me && t.sessionId === sessionId)) return;
       const back = WA.room.id.startsWith("/@/") ? `https://play.workadventu.re${WA.room.id}` : "";
-      const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
+      const note = cmd.note ? `&note=${encodeURIComponent(cmd.note)}` : "";
+      const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${note}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
       WA.nav.goToPage(url);
     });
   } catch (e) {

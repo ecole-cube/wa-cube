@@ -78,6 +78,8 @@ export interface AdminCommand {
   action: "kick";
   reason: KickReason;
   targets: KickTarget[];
+  /** Motif libre affiché à la personne sur la page de déconnexion (140 caractères max). */
+  note?: string;
   by: string;
   /** ms epoch. Une commande de plus de 60 s est ignorée. */
   at: number;
@@ -116,6 +118,7 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
     action: "kick",
     reason,
     targets,
+    note: typeof c.note === "string" ? c.note.slice(0, 140) : undefined,
     by: typeof c.by === "string" ? c.by : "",
     at: c.at,
   };
