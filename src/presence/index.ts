@@ -36,7 +36,6 @@ import {
   PRESENCE_SPACE_FILTER,
   PRESENCE_VERSION,
   PresenceInfo,
-  MODERATION_AROUND_RADIUS,
   ackText,
   canModerate,
   isAdminAck,
@@ -184,34 +183,62 @@ function senderMayModerateMe(fromUuid: string): boolean {
   return canModerate(sender, roleFromTags(myTags, WA.player.isLogged === true));
 }
 
+/** Personnes de la bulle (ou de la salle de réunion) où je suis, comme dans la liste des participants. */
+const bubble = new Map<number, { uuid: string; name: string }>();
+
+function trackBubble(): void {
+  const add = (p: { playerId: number; uuid: string; name: string }) => {
+    if (p.uuid) bubble.set(p.playerId, { uuid: p.uuid, name: p.name });
+  };
+  try {
+    WA.player.meetings.onJoin().subscribe((meeting) => {
+      bubble.clear();
+      meeting.participants.forEach(add);
+      meeting.onParticipantJoin().subscribe(add);
+      meeting.onParticipantLeave().subscribe((p) => bubble.delete(p.playerId));
+      meeting.onLeave().subscribe(() => bubble.clear());
+    });
+  } catch (e) {
+    console.warn("[modération] suivi des réunions indisponible", e);
+  }
+  try {
+    // Ancienne API des bulles de proximité, au cas où meetings ne les remonte pas.
+    WA.player.proximityMeeting.onJoin().subscribe((users) => {
+      bubble.clear();
+      users.forEach(add);
+    });
+    WA.player.proximityMeeting.onParticipantJoin().subscribe(add);
+    WA.player.proximityMeeting.onParticipantLeave().subscribe((p) => bubble.delete(p.playerId));
+    WA.player.proximityMeeting.onLeave().subscribe(() => bubble.clear());
+  } catch (e) {
+    console.warn("[modération] suivi des bulles indisponible", e);
+  }
+}
+
 /**
  * Staff et admin : au clic sur l'avatar de quelqu'un, une entrée "Modération" ouvre la
- * fenêtre du site (message, couper le micro, couper les micros autour de soi).
+ * fenêtre du site (message, couper le micro, couper les micros de la bulle).
  */
 function initModerationMenu(): void {
   const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
   if (myRole !== "admin" && myRole !== "staff") return;
 
-  WA.players.configureTracking({ players: true, movement: true }).catch((e) => console.warn("[modération] suivi", e));
+  trackBubble();
 
   const actions = new Map<number, { remove(): void }>();
   WA.ui.onRemotePlayerClicked.subscribe((remote) => {
     actions.get(remote.playerId)?.remove();
     const action = remote.addAction("Modération", async () => {
       try {
-        const me = await WA.player.getPosition();
-        const around: { uuid: string; name: string }[] = [];
-        for (const p of WA.players.list()) {
-          if (!p.uuid || p.uuid === (WA.player.uuid ?? "")) continue;
+        // Les mêmes personnes que dans la "Liste des participants" de la bulle, hors staff et admins.
+        const around = [...bubble.values()].filter((p) => {
           const role = roleOf(p.uuid);
-          if (role === "staff" || role === "admin") continue;
-          const d = Math.hypot(p.position.x - me.x, p.position.y - me.y);
-          if (d <= MODERATION_AROUND_RADIUS) around.push({ uuid: p.uuid, name: p.name });
-        }
+          return role !== "staff" && role !== "admin";
+        });
         const params = new URLSearchParams({
           to: remote.uuid,
           name: remote.name,
-          around: JSON.stringify(around.slice(0, 40)),
+          around: JSON.stringify(around.slice(0, 40).map(({ uuid, name }) => ({ uuid, name }))),
         });
         WA.ui.modal.openModal({
           title: "Modération",

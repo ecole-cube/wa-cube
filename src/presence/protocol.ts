@@ -175,9 +175,6 @@ export interface ModMute {
   fromName: string;
 }
 
-/** Distance (px de jeu) en dessous de laquelle quelqu'un est "dans la salle" pour la modération. */
-export const MODERATION_AROUND_RADIUS = 600;
-
 /**
  * Qui peut modérer qui : l'admin peut agir sur tout le monde (sauf lui-même), le staff
  * sur les autres personnes seulement, jamais sur un autre staff ni sur un admin.
