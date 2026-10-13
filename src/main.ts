@@ -5,6 +5,7 @@ import { closeDialog } from "@workadventure/npc-dialog-box";
 import { startShowroomTutorial } from "./showroomTutorial";
 import { initTagColors } from "./tagColors";
 import { initPresence } from "./presence";
+import { initDiagnostics } from "./diagnostics";
 
 console.info('Script started successfully');
 
@@ -60,6 +61,23 @@ WA.onInit().then(() => {
     // Présence : permet à l'onglet Admin de lister les personnes du campus,
     // d'aller vers elles, de les faire venir ou de leur envoyer un message.
     initPresence();
+
+    // Boutons "Partager" (invitation) : celui de la barre d'actions ET celui de la liste des
+    // personnes du panneau de gauche dépendent du même réglage de WorkAdventure, ils
+    // disparaissent donc ensemble. L'invitation passe par le bouton "Inviter" de la
+    // page Plan & FAQ (staff et admin).
+    try {
+        WA.controls.disableInviteButton();
+    } catch (e) {
+        console.warn("[partager] bouton non masqué", e);
+    }
+
+    // Chronologie des dernières minutes pour le bouton "Signaler un problème" (Plan & FAQ).
+    try {
+        initDiagnostics();
+    } catch (e) {
+        console.warn("[diagnostic]", e);
+    }
 
     WA.ui.actionBar.addButton({
         id: "nav-btn",

@@ -24,7 +24,7 @@
 
 import { currentTagColors } from "../tagColors";
 import { colorForTags } from "../tagColors/config";
-import { zoneAt } from "../zones";
+import { canEnterAt, zoneAt } from "../zones";
 import {
   ADMIN_COMMAND_MAX_AGE_MS,
   ADMIN_COMMAND_VARIABLE,
@@ -76,6 +76,14 @@ interface NotificationData {
   y?: number;
 }
 
+/** Hauteur du cadre : assez pour afficher tout le message (≈ 38 caractères par ligne). */
+function notificationHeight(n: NotificationData): string {
+  if (n.kind === "ack") return "96px";
+  if (n.kind === "summon") return "250px";
+  const lines = Math.ceil((n.text ?? "").length / 38);
+  return `${Math.min(400, 150 + Math.max(2, lines) * 21)}px`;
+}
+
 /**
  * Ouvre la notification en haut à droite. Les données passent dans le fragment (#),
  * qui n'est jamais envoyé au serveur : le texte d'un message ne finit pas dans des logs.
@@ -99,7 +107,7 @@ async function showNotification(n: NotificationData, autoCloseMs: number): Promi
     allowApi: true,
     visible: true,
     position: { vertical: "top", horizontal: "right" },
-    size: { width: NOTIFICATION_WIDTH, height: n.kind === "ack" ? "96px" : "220px" },
+    size: { width: NOTIFICATION_WIDTH, height: notificationHeight(n) },
     margin: { top: "16px", right: "16px" },
   });
   currentNotification = site;
@@ -193,8 +201,15 @@ export function initPresence(): void {
       if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
       const me = WA.player.uuid ?? "";
       if (!cmd.targets.some((t) => t.uuid === me && t.sessionId === sessionId)) return;
-      const back = WA.room.id.startsWith("/@/") ? `https://play.workadventu.re${WA.room.id}` : "";
-      const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
+      // WA.room.id est une adresse complète (https://play.workadventu.re/@/...) ; un chemin est accepté aussi.
+      const rid = WA.room.id;
+      const back = /^https?:\/\//i.test(rid)
+        ? rid.split("#")[0].split("?")[0]
+        : rid.startsWith("/")
+          ? `https://play.workadventu.re${rid.split("#")[0].split("?")[0]}`
+          : "";
+      const note = cmd.note ? `&note=${encodeURIComponent(cmd.note)}` : "";
+      const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${note}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
       WA.nav.goToPage(url);
     });
   } catch (e) {
@@ -213,9 +228,14 @@ export function initPresence(): void {
       console.warn("[presence] notification indisponible", e);
       const where = s.zone ? ` (${s.zone})` : "";
       const msg = WA.ui.displayActionMessage({
-        message: `${s.fromName} te demande de le rejoindre${where}. Appuie sur espace pour y aller.`,
+        message: `Invitation de ${s.fromName} : un membre de l'équipe t'invite à le rejoindre${where}. Appuie sur espace pour y aller.`,
         type: "message",
         callback: () => {
+          // Jamais plus loin que ce que les droits de la personne permettent à pied.
+          if (!canEnterAt(WA.player.tags ?? [], s.x, s.y + 32)) {
+            sendAck(s.fromUuid, id, "summon", "denied");
+            return;
+          }
           sendAck(s.fromUuid, id, "summon", "accepted");
           WA.player.teleport(s.x, s.y + 32).catch((err) => console.warn(err));
         },
@@ -236,7 +256,7 @@ export function initPresence(): void {
       WA.ui.banner.openBanner({
         id: `admin-message-${Date.now()}`,
         text: `${m.fromName} : ${m.text.slice(0, 280)}`,
-        bgColor: "#6D1FFF",
+        bgColor: "#6E1FFF",
         textColor: "#FFFFFF",
         closable: true,
         timeToClose: NOTIFICATION_AUTO_CLOSE_MS,
