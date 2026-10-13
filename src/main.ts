@@ -62,6 +62,14 @@ WA.onInit().then(() => {
     // d'aller vers elles, de les faire venir ou de leur envoyer un message.
     initPresence();
 
+    // Bouton "Partager" (invitation) de la barre d'actions : masqué pour tout le monde.
+    // Pour le garder aux admins : if (!WA.player.tags.includes("admin")) { ... }
+    try {
+        WA.controls.disableInviteButton();
+    } catch (e) {
+        console.warn("[partager] bouton non masqué", e);
+    }
+
     // Chronologie des dernières minutes pour le bouton "Signaler un problème" (Plan & FAQ).
     try {
         initDiagnostics();
