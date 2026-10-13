@@ -201,7 +201,13 @@ export function initPresence(): void {
       if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
       const me = WA.player.uuid ?? "";
       if (!cmd.targets.some((t) => t.uuid === me && t.sessionId === sessionId)) return;
-      const back = WA.room.id.startsWith("/@/") ? `https://play.workadventu.re${WA.room.id}` : "";
+      // WA.room.id est une adresse complète (https://play.workadventu.re/@/...) ; un chemin est accepté aussi.
+      const rid = WA.room.id;
+      const back = /^https?:\/\//i.test(rid)
+        ? rid.split("#")[0].split("?")[0]
+        : rid.startsWith("/")
+          ? `https://play.workadventu.re${rid.split("#")[0].split("?")[0]}`
+          : "";
       const note = cmd.note ? `&note=${encodeURIComponent(cmd.note)}` : "";
       const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${note}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
       WA.nav.goToPage(url);
