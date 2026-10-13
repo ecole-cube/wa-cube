@@ -35,6 +35,8 @@ export const PRESENCE_EVENTS = {
   message: "admin:message",
   /** Accusé de réception : la personne a pris en compte le message ou la demande. */
   ack: "admin:ack",
+  /** La modération (staff ou admin) coupe le micro de quelqu'un. */
+  mute: "mod:mute",
 } as const;
 
 /**
@@ -157,6 +159,38 @@ export interface AdminMessage {
   fromUuid?: string;
   fromName: string;
   text: string;
+  /**
+   * Message de modération (staff ou admin) : affiché avec l'étiquette "Modération".
+   * Le destinataire vérifie que l'expéditeur est bien staff ou admin avant de l'afficher.
+   */
+  moderation?: boolean;
+}
+
+/** La modération coupe le micro de la personne `to`. Elle peut le rallumer ensuite. */
+export interface ModMute {
+  v: number;
+  id: string;
+  to: string;
+  fromUuid: string;
+  fromName: string;
+}
+
+/**
+ * Qui peut modérer qui : l'admin peut agir sur tout le monde (sauf lui-même), le staff
+ * sur les autres personnes seulement, jamais sur un autre staff ni sur un admin.
+ */
+export function canModerate(sender: PresenceRole, target: PresenceRole): boolean {
+  if (sender === "admin") return true;
+  if (sender === "staff") return target !== "staff" && target !== "admin";
+  return false;
+}
+
+export function isModMute(v: unknown): v is ModMute {
+  if (!v || typeof v !== "object") return false;
+  const m = v as Record<string, unknown>;
+  return (
+    typeof m.to === "string" && typeof m.id === "string" && typeof m.fromUuid === "string" && typeof m.fromName === "string"
+  );
 }
 
 export type AckKind = "message" | "summon";

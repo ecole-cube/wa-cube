@@ -37,10 +37,12 @@ import {
   PRESENCE_VERSION,
   PresenceInfo,
   ackText,
+  canModerate,
   isAdminAck,
   isAdminMessage,
   isAdminSummon,
   isHelloForMe,
+  isModMute,
   parseAdminCommand,
   roleFromTags,
 } from "./protocol";
@@ -58,6 +60,8 @@ const HELLO_JITTER_MS = 1500;
 
 /** Page de notification hébergée sur Lovable (même domaine que Plan & FAQ). */
 const NOTIFICATION_URL = "https://campus-entry-cube.lovable.app/notification";
+/** Fenêtre de modération (message, couper le micro) ouverte au clic sur un avatar. */
+const MODERATION_URL = "https://campus-entry-cube.lovable.app/moderation";
 const NOTIFICATION_WIDTH = "380px";
 const NOTIFICATION_AUTO_CLOSE_MS = 60_000;
 const ACK_AUTO_CLOSE_MS = 8_000;
@@ -74,6 +78,8 @@ interface NotificationData {
   zone?: string | null;
   x?: number;
   y?: number;
+  /** Message venant de la modération : étiquette et couleur distinctes. */
+  mod?: boolean;
 }
 
 /** Hauteur du cadre : assez pour afficher tout le message (≈ 38 caractères par ligne). */
@@ -99,6 +105,7 @@ async function showNotification(n: NotificationData, autoCloseMs: number): Promi
     zone: n.zone ?? "",
     x: String(Math.round(n.x ?? 0)),
     y: String(Math.round(n.y ?? 0)),
+    mod: n.mod ? "1" : "",
   });
   await currentNotification?.close().catch(() => undefined);
   currentNotification = null;
@@ -160,12 +167,112 @@ function isForMe(to: string): boolean {
   return !!to && to === (WA.player.uuid ?? "");
 }
 
+/** Tags des personnes connectées, tenus par le serveur (donc non falsifiables par un joueur). */
+const tagsByUuid = new Map<string, string[]>();
+
+function roleOf(uuid: string) {
+  const tags = tagsByUuid.get(uuid);
+  return tags ? roleFromTags(tags, true) : null;
+}
+
+/** Le rôle de l'expéditeur annoncé dans le message est-il confirmé par le serveur, et suffisant ? */
+function senderMayModerateMe(fromUuid: string): boolean {
+  const sender = roleOf(fromUuid);
+  if (!sender || fromUuid === (WA.player.uuid ?? "")) return false;
+  const myTags = WA.player.tags ?? [];
+  return canModerate(sender, roleFromTags(myTags, WA.player.isLogged === true));
+}
+
+/** Personnes de la bulle (ou de la salle de réunion) où je suis, comme dans la liste des participants. */
+const bubble = new Map<number, { uuid: string; name: string }>();
+
+function trackBubble(): void {
+  const add = (p: { playerId: number; uuid: string; name: string }) => {
+    if (p.uuid) bubble.set(p.playerId, { uuid: p.uuid, name: p.name });
+  };
+  try {
+    WA.player.meetings.onJoin().subscribe((meeting) => {
+      bubble.clear();
+      meeting.participants.forEach(add);
+      meeting.onParticipantJoin().subscribe(add);
+      meeting.onParticipantLeave().subscribe((p) => bubble.delete(p.playerId));
+      meeting.onLeave().subscribe(() => bubble.clear());
+    });
+  } catch (e) {
+    console.warn("[modération] suivi des réunions indisponible", e);
+  }
+  try {
+    // Ancienne API des bulles de proximité, au cas où meetings ne les remonte pas.
+    WA.player.proximityMeeting.onJoin().subscribe((users) => {
+      bubble.clear();
+      users.forEach(add);
+    });
+    WA.player.proximityMeeting.onParticipantJoin().subscribe(add);
+    WA.player.proximityMeeting.onParticipantLeave().subscribe((p) => bubble.delete(p.playerId));
+    WA.player.proximityMeeting.onLeave().subscribe(() => bubble.clear());
+  } catch (e) {
+    console.warn("[modération] suivi des bulles indisponible", e);
+  }
+}
+
+/**
+ * Staff et admin : au clic sur l'avatar de quelqu'un, une entrée "Modération" ouvre la
+ * fenêtre du site (message, couper le micro, couper les micros de la bulle).
+ */
+function initModerationMenu(): void {
+  const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
+  if (myRole !== "admin" && myRole !== "staff") return;
+
+  trackBubble();
+
+  const actions = new Map<number, { remove(): void }>();
+  WA.ui.onRemotePlayerClicked.subscribe((remote) => {
+    actions.get(remote.playerId)?.remove();
+    const action = remote.addAction("Modération", async () => {
+      try {
+        // Les mêmes personnes que dans la "Liste des participants" de la bulle, hors staff et admins.
+        const around = [...bubble.values()].filter((p) => {
+          const role = roleOf(p.uuid);
+          return role !== "staff" && role !== "admin";
+        });
+        const params = new URLSearchParams({
+          to: remote.uuid,
+          name: remote.name,
+          around: JSON.stringify(around.slice(0, 40).map(({ uuid, name }) => ({ uuid, name }))),
+        });
+        WA.ui.modal.openModal({
+          title: "Modération",
+          src: `${MODERATION_URL}#${params.toString()}`,
+          allow: null,
+          allowApi: true,
+          position: "center",
+          closable: true,
+          allowFullScreen: false,
+        });
+      } catch (e) {
+        console.warn("[modération] ouverture impossible", e);
+      }
+    });
+    actions.set(remote.playerId, action);
+  });
+}
+
 /** À appeler une fois, après WA.onInit(). */
 export function initPresence(): void {
   // Apparaître dans la liste native des connectés (aucun trafic ensuite).
   WA.spaces
     .joinSpace(PRESENCE_SPACE, PRESENCE_SPACE_FILTER, [])
+    .then((space) => {
+      space.userJoinedObservable.subscribe((u) => tagsByUuid.set(u.uuid, u.tags ?? []));
+      space.userLeftObservable.subscribe((u) => tagsByUuid.delete(u.uuid));
+    })
     .catch((e) => console.warn("[presence] espace indisponible", e));
+
+  try {
+    initModerationMenu();
+  } catch (e) {
+    console.warn("[modération] menu indisponible", e);
+  }
 
   WA.event.on(PRESENCE_EVENTS.hello).subscribe((ev) => {
     // Seule la personne interrogée répond : un seul message au lieu d'une rafale.
@@ -247,8 +354,20 @@ export function initPresence(): void {
   WA.event.on(PRESENCE_EVENTS.message).subscribe((ev) => {
     if (!isAdminMessage(ev.data) || !isForMe(ev.data.to)) return;
     const m = ev.data;
+    // Un message "modération" n'est affiché que si le serveur confirme que l'expéditeur est staff ou admin.
+    if (m.moderation && !senderMayModerateMe(m.fromUuid ?? "")) {
+      console.warn("[modération] message ignoré : expéditeur non confirmé");
+      return;
+    }
     showNotification(
-      { kind: "message", id: m.id ?? newId(), fromName: m.fromName, fromUuid: m.fromUuid, text: m.text },
+      {
+        kind: "message",
+        id: m.id ?? newId(),
+        fromName: m.fromName,
+        fromUuid: m.fromUuid,
+        text: m.text,
+        mod: m.moderation === true,
+      },
       NOTIFICATION_AUTO_CLOSE_MS,
     ).catch((e) => {
       // Repli : bandeau en haut (pas d'accusé possible, il n'a pas de clic).
@@ -262,6 +381,34 @@ export function initPresence(): void {
         timeToClose: NOTIFICATION_AUTO_CLOSE_MS,
       });
     });
+  });
+
+  // La modération coupe mon micro. Je peux le rallumer : on prévient, on n'enferme pas.
+  const mutesDone = new Set<string>();
+  WA.event.on(PRESENCE_EVENTS.mute).subscribe((ev) => {
+    if (!isModMute(ev.data) || !isForMe(ev.data.to) || mutesDone.has(ev.data.id)) return;
+    const m = ev.data;
+    if (!senderMayModerateMe(m.fromUuid)) {
+      console.warn("[modération] coupure de micro ignorée : expéditeur non confirmé");
+      return;
+    }
+    mutesDone.add(m.id);
+    try {
+      WA.controls.turnOffMicrophone();
+    } catch (e) {
+      console.warn("[modération] micro non coupé", e);
+    }
+    showNotification(
+      {
+        kind: "message",
+        id: m.id,
+        fromName: "Modération",
+        fromUuid: m.fromUuid,
+        text: "Ton micro a été coupé par la modération. Tu peux le rallumer quand tu veux parler.",
+        mod: true,
+      },
+      NOTIFICATION_AUTO_CLOSE_MS,
+    ).catch((e) => console.warn("[modération] notification indisponible", e));
   });
 
   // Côté admin : la personne a cliqué, on affiche l'accusé au même endroit.
