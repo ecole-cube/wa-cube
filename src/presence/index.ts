@@ -76,6 +76,14 @@ interface NotificationData {
   y?: number;
 }
 
+/** Hauteur du cadre : assez pour afficher tout le message (≈ 38 caractères par ligne). */
+function notificationHeight(n: NotificationData): string {
+  if (n.kind === "ack") return "96px";
+  if (n.kind === "summon") return "250px";
+  const lines = Math.ceil((n.text ?? "").length / 38);
+  return `${Math.min(400, 150 + Math.max(2, lines) * 21)}px`;
+}
+
 /**
  * Ouvre la notification en haut à droite. Les données passent dans le fragment (#),
  * qui n'est jamais envoyé au serveur : le texte d'un message ne finit pas dans des logs.
@@ -99,7 +107,7 @@ async function showNotification(n: NotificationData, autoCloseMs: number): Promi
     allowApi: true,
     visible: true,
     position: { vertical: "top", horizontal: "right" },
-    size: { width: NOTIFICATION_WIDTH, height: n.kind === "ack" ? "96px" : "220px" },
+    size: { width: NOTIFICATION_WIDTH, height: notificationHeight(n) },
     margin: { top: "16px", right: "16px" },
   });
   currentNotification = site;
@@ -214,7 +222,7 @@ export function initPresence(): void {
       console.warn("[presence] notification indisponible", e);
       const where = s.zone ? ` (${s.zone})` : "";
       const msg = WA.ui.displayActionMessage({
-        message: `${s.fromName} te demande de le rejoindre${where}. Appuie sur espace pour y aller.`,
+        message: `Invitation de ${s.fromName} : un membre de l'équipe t'invite à le rejoindre${where}. Appuie sur espace pour y aller.`,
         type: "message",
         callback: () => {
           // Jamais plus loin que ce que les droits de la personne permettent à pied.
@@ -242,7 +250,7 @@ export function initPresence(): void {
       WA.ui.banner.openBanner({
         id: `admin-message-${Date.now()}`,
         text: `${m.fromName} : ${m.text.slice(0, 280)}`,
-        bgColor: "#6D1FFF",
+        bgColor: "#6E1FFF",
         textColor: "#FFFFFF",
         closable: true,
         timeToClose: NOTIFICATION_AUTO_CLOSE_MS,
