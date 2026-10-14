@@ -63,8 +63,6 @@ const HELLO_JITTER_MS = 1500;
 
 /** Page de notification hébergée sur Lovable (même domaine que Plan & FAQ). */
 const NOTIFICATION_URL = "https://campus-entry-cube.lovable.app/notification";
-/** Fenêtre de modération (message, couper le micro) ouverte au clic sur un avatar. */
-const MODERATION_URL = "https://campus-entry-cube.lovable.app/moderation";
 const NOTIFICATION_WIDTH = "380px";
 const NOTIFICATION_AUTO_CLOSE_MS = 60_000;
 const ACK_AUTO_CLOSE_MS = 8_000;
@@ -207,47 +205,14 @@ function cutMyMicrophone(id: string, byName: string, byUuid: string | undefined)
   sendAck(byUuid, id, "message", "muted");
 }
 
-/** Personnes de la bulle (ou de la salle de réunion) où je suis, comme dans la liste des participants. */
-const bubble = new Map<number, { uuid: string; name: string }>();
-
-function trackBubble(): void {
-  const add = (p: { playerId: number; uuid: string; name: string }) => {
-    if (p.uuid) bubble.set(p.playerId, { uuid: p.uuid, name: p.name });
-  };
-  try {
-    WA.player.meetings.onJoin().subscribe((meeting) => {
-      bubble.clear();
-      meeting.participants.forEach(add);
-      meeting.onParticipantJoin().subscribe(add);
-      meeting.onParticipantLeave().subscribe((p) => bubble.delete(p.playerId));
-      meeting.onLeave().subscribe(() => bubble.clear());
-    });
-  } catch (e) {
-    console.warn("[modération] suivi des réunions indisponible", e);
-  }
-  try {
-    // Ancienne API des bulles de proximité, au cas où meetings ne les remonte pas.
-    WA.player.proximityMeeting.onJoin().subscribe((users) => {
-      bubble.clear();
-      users.forEach(add);
-    });
-    WA.player.proximityMeeting.onParticipantJoin().subscribe(add);
-    WA.player.proximityMeeting.onParticipantLeave().subscribe((p) => bubble.delete(p.playerId));
-    WA.player.proximityMeeting.onLeave().subscribe(() => bubble.clear());
-  } catch (e) {
-    console.warn("[modération] suivi des bulles indisponible", e);
-  }
-}
-
 /**
- * Staff et admin : au clic sur l'avatar de quelqu'un, une entrée "Modération" ouvre la
- * fenêtre du site (message, couper le micro, couper les micros de la bulle).
+ * Staff et admin : au clic sur l'avatar de quelqu'un, trois actions directes (couper son micro,
+ * couper les micros de sa bulle, demander de déverrouiller à toute la bulle).
  */
 function initModerationMenu(): void {
   const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
   if (myRole !== "admin" && myRole !== "staff") return;
 
-  trackBubble();
   // Les personnes autour d'un avatar cliqué (sa bulle) : positions des joueurs visibles à l'écran.
   WA.players.configureTracking({ players: true, movement: true }).catch((e) => console.warn("[modération] suivi", e));
   /** Distance (px) en dessous de laquelle quelqu'un est dans la même bulle que l'avatar cliqué. */
@@ -378,31 +343,6 @@ function initModerationMenu(): void {
       }),
     );
 
-    list.push(remote.addAction("Modération", async () => {
-      try {
-        // Les mêmes personnes que dans la "Liste des participants" de la bulle, hors staff et admins.
-        const around = [...bubble.values()].filter((p) => {
-          const role = roleOf(p.uuid);
-          return role !== "staff" && role !== "admin";
-        });
-        const params = new URLSearchParams({
-          to: remote.uuid,
-          name: remote.name,
-          around: JSON.stringify(around.slice(0, 40).map(({ uuid, name }) => ({ uuid, name }))),
-        });
-        WA.ui.modal.openModal({
-          title: "Modération",
-          src: `${MODERATION_URL}#${params.toString()}`,
-          allow: null,
-          allowApi: true,
-          position: "center",
-          closable: true,
-          allowFullScreen: false,
-        });
-      } catch (e) {
-        console.warn("[modération] ouverture impossible", e);
-      }
-    }));
     actions.set(remote.playerId, list);
   });
 }
