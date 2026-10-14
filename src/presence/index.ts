@@ -308,6 +308,27 @@ export function initPresence(): void {
       if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
       const me = WA.player.uuid ?? "";
       if (!cmd.targets.some((t) => t.uuid === me && t.sessionId === sessionId)) return;
+      if (cmd.action === "teleport") {
+        // L'admin amène la personne à lui. Jamais plus loin que ses droits ne le permettent à pied.
+        const x = cmd.x ?? 0;
+        const y = (cmd.y ?? 0) + 32;
+        if (!canEnterAt(WA.player.tags ?? [], x, y)) return;
+        WA.player
+          .teleport(x, y)
+          .then(() =>
+            showNotification(
+              {
+                kind: "message",
+                id: cmd.id,
+                fromName: cmd.by || "Un membre de l'équipe",
+                text: "Tu as été téléporté auprès de cette personne de l'équipe.",
+              },
+              NOTIFICATION_AUTO_CLOSE_MS,
+            ),
+          )
+          .catch((e) => console.warn("[presence] téléportation impossible", e));
+        return;
+      }
       // WA.room.id est une adresse complète (https://play.workadventu.re/@/...) ; un chemin est accepté aussi.
       const rid = WA.room.id;
       const back = /^https?:\/\//i.test(rid)

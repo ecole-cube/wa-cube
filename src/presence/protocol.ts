@@ -77,9 +77,14 @@ export interface AdminCommand {
   v: number;
   /** Identifiant unique : une commande n'est exécutée qu'une fois. */
   id: string;
-  action: "kick";
+  /** kick : déconnecter. teleport : amener la personne à (x, y). */
+  action: "kick" | "teleport";
   reason: KickReason;
   targets: KickTarget[];
+  /** Point d'arrivée d'une téléportation (action "teleport"), en pixels de la map. */
+  x?: number;
+  y?: number;
+  zone?: string | null;
   /** Motif libre affiché à la personne sur la page de déconnexion (140 caractères max). */
   note?: string;
   by: string;
@@ -101,7 +106,10 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
   }
   if (!data || typeof data !== "object") return null;
   const c = data as Record<string, unknown>;
-  if (c.action !== "kick" || typeof c.id !== "string" || typeof c.at !== "number") return null;
+  if ((c.action !== "kick" && c.action !== "teleport") || typeof c.id !== "string" || typeof c.at !== "number") {
+    return null;
+  }
+  if (c.action === "teleport" && (typeof c.x !== "number" || typeof c.y !== "number")) return null;
   if (!Array.isArray(c.targets)) return null;
   const targets: KickTarget[] = [];
   for (const t of c.targets) {
@@ -117,9 +125,12 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
   return {
     v: typeof c.v === "number" ? c.v : 1,
     id: c.id,
-    action: "kick",
+    action: c.action,
     reason,
     targets,
+    x: typeof c.x === "number" ? c.x : undefined,
+    y: typeof c.y === "number" ? c.y : undefined,
+    zone: typeof c.zone === "string" ? c.zone : null,
     note: typeof c.note === "string" ? c.note.slice(0, 140) : undefined,
     by: typeof c.by === "string" ? c.by : "",
     at: c.at,
