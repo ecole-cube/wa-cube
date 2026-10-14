@@ -21,6 +21,7 @@ export const ZONES: Zone[] = [
   { name: "Salle 5", x: 4128, y: 352, w: 640, h: 864 },
   { name: "Salle 6", x: 4800, y: 352, w: 640, h: 864 },
   { name: "Salle 7", x: 5136, y: 1376, w: 336, h: 448 },
+  { name: "Cowork", x: 1440, y: 1240, w: 1010, h: 630 },
   { name: "Staff", x: 346, y: 1240, w: 462, h: 722 },
   { name: "Showroom", x: 119, y: 3497, w: 1470, h: 440 },
   { name: "Événement", x: 4864, y: 2776, w: 514, h: 1040 },
