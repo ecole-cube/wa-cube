@@ -24,6 +24,13 @@ export const PRESENCE_SPACE_FILTER = "streaming" as const;
  */
 export const ADMIN_COMMAND_VARIABLE = "adminCommand";
 
+/**
+ * Même principe pour le staff : variable déclarée dans campus.tmj avec `writableBy: staff`.
+ * Elle ne porte que les actions de modération douces (message, couper un micro) : le serveur
+ * refuse l'écriture à tout autre compte, donc l'expéditeur n'a pas à être vérifié par les joueurs.
+ */
+export const STAFF_COMMAND_VARIABLE = "staffCommand";
+
 export const PRESENCE_EVENTS = {
   /** "Où es-tu ?" : envoyé par la page admin à UNE personne (champ `to`). */
   hello: "presence:hello",
@@ -78,9 +85,11 @@ export interface AdminCommand {
   /** Identifiant unique : une commande n'est exécutée qu'une fois. */
   id: string;
   /** kick : déconnecter. teleport : amener la personne à (x, y). */
-  action: "kick" | "teleport" | "mute";
+  action: "kick" | "teleport" | "mute" | "message";
   reason: KickReason;
   targets: KickTarget[];
+  /** Texte d'un message de modération (action "message"), 280 caractères au plus. */
+  text?: string;
   /** Point d'arrivée d'une téléportation (action "teleport"), en pixels de la map. */
   x?: number;
   y?: number;
@@ -109,7 +118,7 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
   if (!data || typeof data !== "object") return null;
   const c = data as Record<string, unknown>;
   if (
-    (c.action !== "kick" && c.action !== "teleport" && c.action !== "mute") ||
+    (c.action !== "kick" && c.action !== "teleport" && c.action !== "mute" && c.action !== "message") ||
     typeof c.id !== "string" ||
     typeof c.at !== "number"
   ) {
@@ -124,8 +133,8 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
     if (typeof r.uuid !== "string" || !r.uuid) continue;
     if (typeof r.sessionId === "string" && r.sessionId) {
       targets.push({ uuid: r.uuid, sessionId: r.sessionId });
-    } else if (c.action === "mute") {
-      // Couper un micro vise la personne, tous ses onglets : pas besoin de connaître l'onglet.
+    } else if (c.action === "mute" || c.action === "message") {
+      // Couper un micro ou envoyer un message vise la personne, tous ses onglets.
       targets.push({ uuid: r.uuid, sessionId: "" });
     }
   }
@@ -138,6 +147,7 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
     action: c.action,
     reason,
     targets,
+    text: typeof c.text === "string" ? c.text.slice(0, 280) : undefined,
     x: typeof c.x === "number" ? c.x : undefined,
     y: typeof c.y === "number" ? c.y : undefined,
     zone: typeof c.zone === "string" ? c.zone : null,
