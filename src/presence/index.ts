@@ -31,6 +31,8 @@ import {
   AckAction,
   AckKind,
   AdminAck,
+  AdminCommand,
+  ModMute,
   AdminMessage,
   PRESENCE_EVENTS,
   PRESENCE_SPACE,
@@ -184,6 +186,27 @@ function senderMayModerateMe(fromUuid: string): boolean {
   return canModerate(sender, roleFromTags(myTags, WA.player.isLogged === true));
 }
 
+/** Coupe mon micro (je peux le rallumer), prévient la personne et renvoie l'accusé à l'expéditeur. */
+function cutMyMicrophone(id: string, byName: string, byUuid: string | undefined): void {
+  try {
+    WA.controls.turnOffMicrophone();
+  } catch (e) {
+    console.warn("[modération] micro non coupé", e);
+  }
+  showNotification(
+    {
+      kind: "message",
+      id,
+      fromName: byName || "Modération",
+      fromUuid: byUuid,
+      text: "Ton micro a été coupé par la modération. Tu peux le rallumer quand tu veux parler.",
+      mod: true,
+    },
+    NOTIFICATION_AUTO_CLOSE_MS,
+  ).catch((e) => console.warn("[modération] notification indisponible", e));
+  sendAck(byUuid, id, "message", "muted");
+}
+
 /** Personnes de la bulle (ou de la salle de réunion) où je suis, comme dans la liste des participants. */
 const bubble = new Map<number, { uuid: string; name: string }>();
 
@@ -225,44 +248,129 @@ function initModerationMenu(): void {
   if (myRole !== "admin" && myRole !== "staff") return;
 
   trackBubble();
+  // Les personnes autour d'un avatar cliqué (sa bulle) : positions des joueurs visibles à l'écran.
+  WA.players.configureTracking({ players: true, movement: true }).catch((e) => console.warn("[modération] suivi", e));
+  /** Distance (px) en dessous de laquelle quelqu'un est dans la même bulle que l'avatar cliqué. */
+  const SAME_BUBBLE_PX = 190;
 
-  const actions = new Map<number, { remove(): void }[]>();
+  const feedback = (text: string) =>
+    showNotification({ kind: "ack", id: newId(), fromName: "Modération", text }, ACK_AUTO_CLOSE_MS).catch((e) =>
+      console.warn("[modération] retour impossible", e),
+    );
+
+  /** L'avatar cliqué et ceux de sa bulle, hors staff et admins, hors moi. */
+  const groupOf = (remote: { uuid: string; name: string; position: { x: number; y: number } }) => {
+    const out = new Map<string, string>();
+    const add = (uuid: string, name: string) => {
+      if (!uuid || uuid === (WA.player.uuid ?? "")) return;
+      const role = roleOf(uuid);
+      if (role && !canModerate(myRole, role)) return;
+      out.set(uuid, name);
+    };
+    add(remote.uuid, remote.name);
+    try {
+      for (const p of WA.players.list()) {
+        const d = Math.hypot(p.position.x - remote.position.x, p.position.y - remote.position.y);
+        if (d <= SAME_BUBBLE_PX) add(p.uuid, p.name);
+      }
+    } catch {
+      /* suivi indisponible : seule la personne cliquée est visée */
+    }
+    return [...out.entries()].slice(0, 12).map(([uuid, name]) => ({ uuid, name }));
+  };
+
+  /** Coupe les micros : par la variable des admins si je suis admin, sinon par événement (staff). */
+  const muteMany = async (targets: { uuid: string; name: string }[]) => {
+    if (targets.length === 0) {
+      feedback("Personne à viser ici.");
+      return;
+    }
+    try {
+      if (myRole === "admin") {
+        const cmd: AdminCommand = {
+          v: PRESENCE_VERSION,
+          id: newId(),
+          action: "mute",
+          reason: "other",
+          targets: targets.map((t) => ({ uuid: t.uuid, sessionId: "" })),
+          by: WA.player.name,
+          byUuid: WA.player.uuid ?? "",
+          at: Date.now(),
+        };
+        await WA.state.saveVariable(ADMIN_COMMAND_VARIABLE, JSON.stringify(cmd));
+      } else {
+        for (const t of targets) {
+          const m: ModMute = {
+            v: PRESENCE_VERSION,
+            id: newId(),
+            to: t.uuid,
+            fromUuid: WA.player.uuid ?? "",
+            fromName: WA.player.name,
+          };
+          await WA.event.broadcast(PRESENCE_EVENTS.mute, m);
+        }
+      }
+      feedback(
+        targets.length === 1
+          ? `Micro de ${targets[0].name} coupé.`
+          : `Micros coupés : ${targets.map((t) => t.name).join(", ")}.`,
+      );
+    } catch (e) {
+      console.warn("[modération] coupure non envoyée", e);
+      feedback("La coupure n'a pas pu partir. Réessaie.");
+    }
+  };
+
   const unlockAskedAt = new Map<string, number>();
+  const actions = new Map<number, { remove(): void }[]>();
   WA.ui.onRemotePlayerClicked.subscribe((remote) => {
     actions.get(remote.playerId)?.forEach((a) => a.remove());
     const list: { remove(): void }[] = [];
 
-    // Une bulle verrouillée ne se déverrouille pas par script : on demande poliment à la personne.
     list.push(
-      remote.addAction("Demander de déverrouiller", async () => {
-        const feedback = (text: string) =>
-          showNotification(
-            { kind: "ack", id: newId(), fromName: "Modération", text },
-            ACK_AUTO_CLOSE_MS,
-          ).catch((e) => console.warn("[modération] retour impossible", e));
-        const target = roleOf(remote.uuid);
-        if (target && !canModerate(myRole, target)) {
+      remote.addAction("Couper son micro", () => {
+        const role = roleOf(remote.uuid);
+        if (role && !canModerate(myRole, role)) {
           feedback("Tu ne peux pas viser cette personne.");
           return;
         }
-        const last = unlockAskedAt.get(remote.uuid) ?? 0;
-        if (Date.now() - last < 30_000) {
-          feedback(`La demande a déjà été envoyée à ${remote.name}.`);
+        void muteMany([{ uuid: remote.uuid, name: remote.name }]);
+      }),
+    );
+
+    list.push(
+      remote.addAction("Couper les micros de sa bulle", () => {
+        void muteMany(groupOf(remote));
+      }),
+    );
+
+    // Une bulle verrouillée ne se déverrouille pas par script : on demande poliment, à toute la bulle.
+    list.push(
+      remote.addAction("Demander de déverrouiller", async () => {
+        const targets = groupOf(remote).filter((t) => Date.now() - (unlockAskedAt.get(t.uuid) ?? 0) > 30_000);
+        if (targets.length === 0) {
+          feedback("La demande a déjà été envoyée à cette bulle.");
           return;
         }
-        unlockAskedAt.set(remote.uuid, Date.now());
-        const payload: AdminMessage = {
-          v: PRESENCE_VERSION,
-          id: newId(),
-          fromUuid: WA.player.uuid ?? "",
-          to: remote.uuid,
-          fromName: WA.player.name,
-          text: "Un membre de l'équipe souhaite rejoindre ta bulle. Peux-tu la déverrouiller avec le cadenas ? Merci.",
-          moderation: true,
-        };
         try {
-          await WA.event.broadcast(PRESENCE_EVENTS.message, payload);
-          feedback(`Demande envoyée à ${remote.name}.`);
+          for (const t of targets) {
+            unlockAskedAt.set(t.uuid, Date.now());
+            const payload: AdminMessage = {
+              v: PRESENCE_VERSION,
+              id: newId(),
+              fromUuid: WA.player.uuid ?? "",
+              to: t.uuid,
+              fromName: WA.player.name,
+              text: "Un membre de l'équipe souhaite rejoindre ta bulle. Peux-tu la déverrouiller avec le cadenas ? Merci.",
+              moderation: true,
+            };
+            await WA.event.broadcast(PRESENCE_EVENTS.message, payload);
+          }
+          feedback(
+            targets.length === 1
+              ? `Demande envoyée à ${targets[0].name}.`
+              : `Demande envoyée à ${targets.length} personnes de la bulle.`,
+          );
         } catch (e) {
           console.warn("[modération] demande non envoyée", e);
           feedback("La demande n'a pas pu partir. Réessaie.");
@@ -349,7 +457,12 @@ export function initPresence(): void {
       done.add(cmd.id);
       if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
       const me = WA.player.uuid ?? "";
-      if (!cmd.targets.some((t) => t.uuid === me && t.sessionId === sessionId)) return;
+      if (!cmd.targets.some((t) => t.uuid === me && (cmd.action === "mute" || t.sessionId === sessionId))) return;
+      if (cmd.action === "mute") {
+        // Variable inscriptible par les admins seulement : pas d'autre vérification d'expéditeur à faire.
+        cutMyMicrophone(cmd.id, cmd.by || "Modération", cmd.byUuid);
+        return;
+      }
       if (cmd.action === "teleport") {
         // L'admin amène la personne à lui. Jamais plus loin que ses droits ne le permettent à pied.
         const x = cmd.x ?? 0;
@@ -456,22 +569,7 @@ export function initPresence(): void {
       return;
     }
     mutesDone.add(m.id);
-    try {
-      WA.controls.turnOffMicrophone();
-    } catch (e) {
-      console.warn("[modération] micro non coupé", e);
-    }
-    showNotification(
-      {
-        kind: "message",
-        id: m.id,
-        fromName: "Modération",
-        fromUuid: m.fromUuid,
-        text: "Ton micro a été coupé par la modération. Tu peux le rallumer quand tu veux parler.",
-        mod: true,
-      },
-      NOTIFICATION_AUTO_CLOSE_MS,
-    ).catch((e) => console.warn("[modération] notification indisponible", e));
+    cutMyMicrophone(m.id, m.fromName, m.fromUuid);
   });
 
   // Côté admin : la personne a cliqué, on affiche l'accusé au même endroit.
