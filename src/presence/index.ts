@@ -42,7 +42,6 @@ import {
   isAdminAck,
   isAdminMessage,
   isAdminSummon,
-  isCoworkHelp,
   isHelloForMe,
   isModMute,
   parseAdminCommand,
@@ -445,31 +444,6 @@ export function initPresence(): void {
         timeToClose: NOTIFICATION_AUTO_CLOSE_MS,
       });
     });
-  });
-
-  // Demande d'aide depuis l'espace de coworking : seuls le staff et les admins la reçoivent.
-  const helpSeen = new Map<string, number>();
-  WA.event.on(PRESENCE_EVENTS.coworkHelp).subscribe((ev) => {
-    const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
-    if (myRole !== "staff" && myRole !== "admin") return;
-    if (!isCoworkHelp(ev.data)) return;
-    const h = ev.data;
-    // Une personne qui insiste n'inonde pas : une demande par minute et par personne.
-    const last = helpSeen.get(h.fromUuid) ?? 0;
-    if (Date.now() - last < 60_000) return;
-    helpSeen.set(h.fromUuid, Date.now());
-    const where = h.table ? `à la table ${h.table}` : "dans l'espace de coworking";
-    const topic = h.topic ? ` Sujet : ${h.topic}.` : "";
-    showNotification(
-      {
-        kind: "message",
-        id: h.id,
-        fromName: h.fromName,
-        fromUuid: h.fromUuid,
-        text: `Un coup de main est demandé ${where}.${topic}`,
-      },
-      NOTIFICATION_AUTO_CLOSE_MS,
-    ).catch((e) => console.warn("[cowork] notification indisponible", e));
   });
 
   // La modération coupe mon micro. Je peux le rallumer : on prévient, on n'enferme pas.

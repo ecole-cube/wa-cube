@@ -37,8 +37,6 @@ export const PRESENCE_EVENTS = {
   ack: "admin:ack",
   /** La modération (staff ou admin) coupe le micro de quelqu'un. */
   mute: "mod:mute",
-  /** Depuis le panneau de coworking : "j'ai besoin d'un coup de main". Reçu par le staff et les admins. */
-  coworkHelp: "cowork:help",
 } as const;
 
 /**
@@ -204,23 +202,6 @@ export function isModMute(v: unknown): v is ModMute {
   return (
     typeof m.to === "string" && typeof m.id === "string" && typeof m.fromUuid === "string" && typeof m.fromName === "string"
   );
-}
-
-/** Demande d'aide envoyée depuis l'espace de coworking. */
-export interface CoworkHelp {
-  v: number;
-  id: string;
-  fromUuid: string;
-  fromName: string;
-  /** Table 1 à 6, ou null si la personne n'est pas encore assise. */
-  table: number | null;
-  topic?: string;
-}
-
-export function isCoworkHelp(v: unknown): v is CoworkHelp {
-  if (!v || typeof v !== "object") return false;
-  const h = v as Record<string, unknown>;
-  return typeof h.id === "string" && typeof h.fromUuid === "string" && typeof h.fromName === "string";
 }
 
 export type AckKind = "message" | "summon";
