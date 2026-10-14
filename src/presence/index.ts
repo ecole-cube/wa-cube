@@ -28,12 +28,11 @@ import { canEnterAt, zoneAt } from "../zones";
 import {
   ADMIN_COMMAND_MAX_AGE_MS,
   ADMIN_COMMAND_VARIABLE,
+  STAFF_COMMAND_VARIABLE,
   AckAction,
   AckKind,
   AdminAck,
   AdminCommand,
-  ModMute,
-  AdminMessage,
   PRESENCE_EVENTS,
   PRESENCE_SPACE,
   PRESENCE_SPACE_FILTER,
@@ -45,7 +44,6 @@ import {
   isAdminMessage,
   isAdminSummon,
   isHelloForMe,
-  isModMute,
   parseAdminCommand,
   roleFromTags,
 } from "./protocol";
@@ -176,14 +174,6 @@ function roleOf(uuid: string) {
   return tags ? roleFromTags(tags, true) : null;
 }
 
-/** Le rôle de l'expéditeur annoncé dans le message est-il confirmé par le serveur, et suffisant ? */
-function senderMayModerateMe(fromUuid: string): boolean {
-  const sender = roleOf(fromUuid);
-  if (!sender || fromUuid === (WA.player.uuid ?? "")) return false;
-  const myTags = WA.player.tags ?? [];
-  return canModerate(sender, roleFromTags(myTags, WA.player.isLogged === true));
-}
-
 /** Coupe mon micro (je peux le rallumer), prévient la personne et renvoie l'accusé à l'expéditeur. */
 function cutMyMicrophone(id: string, byName: string, byUuid: string | undefined): void {
   try {
@@ -244,37 +234,28 @@ function initModerationMenu(): void {
     return [...out.entries()].slice(0, 12).map(([uuid, name]) => ({ uuid, name }));
   };
 
-  /** Coupe les micros : par la variable des admins si je suis admin, sinon par événement (staff). */
+  /** Envoie une commande par la variable de mon rôle : admin (adminCommand) ou staff (staffCommand). */
+  const send = async (cmd: Omit<AdminCommand, "v" | "id" | "reason" | "by" | "byUuid" | "at">) => {
+    const full: AdminCommand = {
+      v: PRESENCE_VERSION,
+      id: newId(),
+      reason: "other",
+      by: WA.player.name,
+      byUuid: WA.player.uuid ?? "",
+      at: Date.now(),
+      ...cmd,
+    };
+    const variable = myRole === "admin" ? ADMIN_COMMAND_VARIABLE : STAFF_COMMAND_VARIABLE;
+    await WA.state.saveVariable(variable, JSON.stringify(full));
+  };
+
   const muteMany = async (targets: { uuid: string; name: string }[]) => {
     if (targets.length === 0) {
       feedback("Personne à viser ici.");
       return;
     }
     try {
-      if (myRole === "admin") {
-        const cmd: AdminCommand = {
-          v: PRESENCE_VERSION,
-          id: newId(),
-          action: "mute",
-          reason: "other",
-          targets: targets.map((t) => ({ uuid: t.uuid, sessionId: "" })),
-          by: WA.player.name,
-          byUuid: WA.player.uuid ?? "",
-          at: Date.now(),
-        };
-        await WA.state.saveVariable(ADMIN_COMMAND_VARIABLE, JSON.stringify(cmd));
-      } else {
-        for (const t of targets) {
-          const m: ModMute = {
-            v: PRESENCE_VERSION,
-            id: newId(),
-            to: t.uuid,
-            fromUuid: WA.player.uuid ?? "",
-            fromName: WA.player.name,
-          };
-          await WA.event.broadcast(PRESENCE_EVENTS.mute, m);
-        }
-      }
+      await send({ action: "mute", targets: targets.map((t) => ({ uuid: t.uuid, sessionId: "" })) });
       feedback(
         targets.length === 1
           ? `Micro de ${targets[0].name} coupé.`
@@ -318,19 +299,12 @@ function initModerationMenu(): void {
           return;
         }
         try {
-          for (const t of targets) {
-            unlockAskedAt.set(t.uuid, Date.now());
-            const payload: AdminMessage = {
-              v: PRESENCE_VERSION,
-              id: newId(),
-              fromUuid: WA.player.uuid ?? "",
-              to: t.uuid,
-              fromName: WA.player.name,
-              text: "Un membre de l'équipe souhaite rejoindre ta bulle. Peux-tu la déverrouiller avec le cadenas ? Merci.",
-              moderation: true,
-            };
-            await WA.event.broadcast(PRESENCE_EVENTS.message, payload);
-          }
+          targets.forEach((t) => unlockAskedAt.set(t.uuid, Date.now()));
+          await send({
+            action: "message",
+            targets: targets.map((t) => ({ uuid: t.uuid, sessionId: "" })),
+            text: "Un membre de l'équipe souhaite rejoindre ta bulle. Peux-tu la déverrouiller avec le cadenas ? Merci.",
+          });
           feedback(
             targets.length === 1
               ? `Demande envoyée à ${targets[0].name}.`
@@ -388,53 +362,77 @@ export function initPresence(): void {
     console.warn("[presence] suivi d'activité indisponible", e);
   }
 
-  // Commande de modération envoyée par un admin.
+  // Commandes de modération : variable des admins (tout) et variable du staff (messages et micros
+  // seulement). Le serveur WorkAdventure refuse l'écriture à tout autre compte.
   const done = new Set<string>();
+  const handleCommand = (value: unknown, via: "admin" | "staff") => {
+    const cmd = parseAdminCommand(value);
+    if (!cmd || done.has(cmd.id)) return;
+    done.add(cmd.id);
+    if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
+    const me = WA.player.uuid ?? "";
+    const soft = cmd.action === "mute" || cmd.action === "message";
+    // Le staff n'a que les actions douces, et jamais sur un autre staff ni sur un admin.
+    if (via === "staff") {
+      if (!soft) return;
+      const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
+      if (myRole === "staff" || myRole === "admin") return;
+    }
+    if (!cmd.targets.some((t) => t.uuid === me && (soft || t.sessionId === sessionId))) return;
+
+    if (cmd.action === "mute") {
+      cutMyMicrophone(cmd.id, cmd.by || "Modération", cmd.byUuid);
+      return;
+    }
+    if (cmd.action === "message") {
+      showNotification(
+        {
+          kind: "message",
+          id: cmd.id,
+          fromName: cmd.by || "Modération",
+          fromUuid: cmd.byUuid,
+          text: cmd.text ?? "",
+          mod: true,
+        },
+        NOTIFICATION_AUTO_CLOSE_MS,
+      ).catch((e) => console.warn("[modération] notification indisponible", e));
+      return;
+    }
+    if (cmd.action === "teleport") {
+      // L'admin amène la personne à lui. Jamais plus loin que ses droits ne le permettent à pied.
+      const x = cmd.x ?? 0;
+      const y = (cmd.y ?? 0) + 32;
+      if (!canEnterAt(WA.player.tags ?? [], x, y)) return;
+      WA.player
+        .teleport(x, y)
+        .then(() =>
+          showNotification(
+            {
+              kind: "message",
+              id: cmd.id,
+              fromName: cmd.by || "Un membre de l'équipe",
+              text: "Tu as été téléporté auprès de cette personne de l'équipe.",
+            },
+            NOTIFICATION_AUTO_CLOSE_MS,
+          ),
+        )
+        .catch((e) => console.warn("[presence] téléportation impossible", e));
+      return;
+    }
+    // WA.room.id est une adresse complète (https://play.workadventu.re/@/...) ; un chemin est accepté aussi.
+    const rid = WA.room.id;
+    const back = /^https?:\/\//i.test(rid)
+      ? rid.split("#")[0].split("?")[0]
+      : rid.startsWith("/")
+        ? `https://play.workadventu.re${rid.split("#")[0].split("?")[0]}`
+        : "";
+    const note = cmd.note ? `&note=${encodeURIComponent(cmd.note)}` : "";
+    const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${note}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
+    WA.nav.goToPage(url);
+  };
   try {
-    WA.state.onVariableChange(ADMIN_COMMAND_VARIABLE).subscribe((value) => {
-      const cmd = parseAdminCommand(value);
-      if (!cmd || done.has(cmd.id)) return;
-      done.add(cmd.id);
-      if (Math.abs(Date.now() - cmd.at) > ADMIN_COMMAND_MAX_AGE_MS) return;
-      const me = WA.player.uuid ?? "";
-      if (!cmd.targets.some((t) => t.uuid === me && (cmd.action === "mute" || t.sessionId === sessionId))) return;
-      if (cmd.action === "mute") {
-        // Variable inscriptible par les admins seulement : pas d'autre vérification d'expéditeur à faire.
-        cutMyMicrophone(cmd.id, cmd.by || "Modération", cmd.byUuid);
-        return;
-      }
-      if (cmd.action === "teleport") {
-        // L'admin amène la personne à lui. Jamais plus loin que ses droits ne le permettent à pied.
-        const x = cmd.x ?? 0;
-        const y = (cmd.y ?? 0) + 32;
-        if (!canEnterAt(WA.player.tags ?? [], x, y)) return;
-        WA.player
-          .teleport(x, y)
-          .then(() =>
-            showNotification(
-              {
-                kind: "message",
-                id: cmd.id,
-                fromName: cmd.by || "Un membre de l'équipe",
-                text: "Tu as été téléporté auprès de cette personne de l'équipe.",
-              },
-              NOTIFICATION_AUTO_CLOSE_MS,
-            ),
-          )
-          .catch((e) => console.warn("[presence] téléportation impossible", e));
-        return;
-      }
-      // WA.room.id est une adresse complète (https://play.workadventu.re/@/...) ; un chemin est accepté aussi.
-      const rid = WA.room.id;
-      const back = /^https?:\/\//i.test(rid)
-        ? rid.split("#")[0].split("?")[0]
-        : rid.startsWith("/")
-          ? `https://play.workadventu.re${rid.split("#")[0].split("?")[0]}`
-          : "";
-      const note = cmd.note ? `&note=${encodeURIComponent(cmd.note)}` : "";
-      const url = `${LEFT_URL}?r=${encodeURIComponent(cmd.reason)}${note}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
-      WA.nav.goToPage(url);
-    });
+    WA.state.onVariableChange(ADMIN_COMMAND_VARIABLE).subscribe((value) => handleCommand(value, "admin"));
+    WA.state.onVariableChange(STAFF_COMMAND_VARIABLE).subscribe((value) => handleCommand(value, "staff"));
   } catch (e) {
     console.warn("[presence] canal de modération indisponible", e);
   }
@@ -470,11 +468,9 @@ export function initPresence(): void {
   WA.event.on(PRESENCE_EVENTS.message).subscribe((ev) => {
     if (!isAdminMessage(ev.data) || !isForMe(ev.data.to)) return;
     const m = ev.data;
-    // Un message "modération" n'est affiché que si le serveur confirme que l'expéditeur est staff ou admin.
-    if (m.moderation && !senderMayModerateMe(m.fromUuid ?? "")) {
-      console.warn("[modération] message ignoré : expéditeur non confirmé");
-      return;
-    }
+    // Les messages de modération passent par les variables staffCommand / adminCommand (serveur) :
+    // un événement qui se réclame de la modération n'est pas affiché.
+    if (m.moderation) return;
     showNotification(
       {
         kind: "message",
@@ -482,7 +478,6 @@ export function initPresence(): void {
         fromName: m.fromName,
         fromUuid: m.fromUuid,
         text: m.text,
-        mod: m.moderation === true,
       },
       NOTIFICATION_AUTO_CLOSE_MS,
     ).catch((e) => {
@@ -497,19 +492,6 @@ export function initPresence(): void {
         timeToClose: NOTIFICATION_AUTO_CLOSE_MS,
       });
     });
-  });
-
-  // La modération coupe mon micro. Je peux le rallumer : on prévient, on n'enferme pas.
-  const mutesDone = new Set<string>();
-  WA.event.on(PRESENCE_EVENTS.mute).subscribe((ev) => {
-    if (!isModMute(ev.data) || !isForMe(ev.data.to) || mutesDone.has(ev.data.id)) return;
-    const m = ev.data;
-    if (!senderMayModerateMe(m.fromUuid)) {
-      console.warn("[modération] coupure de micro ignorée : expéditeur non confirmé");
-      return;
-    }
-    mutesDone.add(m.id);
-    cutMyMicrophone(m.id, m.fromName, m.fromUuid);
   });
 
   // Côté admin : la personne a cliqué, on affiche l'accusé au même endroit.
