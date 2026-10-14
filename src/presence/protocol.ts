@@ -78,7 +78,7 @@ export interface AdminCommand {
   /** Identifiant unique : une commande n'est exécutée qu'une fois. */
   id: string;
   /** kick : déconnecter. teleport : amener la personne à (x, y). */
-  action: "kick" | "teleport";
+  action: "kick" | "teleport" | "mute";
   reason: KickReason;
   targets: KickTarget[];
   /** Point d'arrivée d'une téléportation (action "teleport"), en pixels de la map. */
@@ -88,6 +88,8 @@ export interface AdminCommand {
   /** Motif libre affiché à la personne sur la page de déconnexion (140 caractères max). */
   note?: string;
   by: string;
+  /** uuid de l'admin, pour que l'accusé lui revienne. */
+  byUuid?: string;
   /** ms epoch. Une commande de plus de 60 s est ignorée. */
   at: number;
 }
@@ -106,7 +108,11 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
   }
   if (!data || typeof data !== "object") return null;
   const c = data as Record<string, unknown>;
-  if ((c.action !== "kick" && c.action !== "teleport") || typeof c.id !== "string" || typeof c.at !== "number") {
+  if (
+    (c.action !== "kick" && c.action !== "teleport" && c.action !== "mute") ||
+    typeof c.id !== "string" ||
+    typeof c.at !== "number"
+  ) {
     return null;
   }
   if (c.action === "teleport" && (typeof c.x !== "number" || typeof c.y !== "number")) return null;
@@ -115,8 +121,12 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
   for (const t of c.targets) {
     if (!t || typeof t !== "object") continue;
     const r = t as Record<string, unknown>;
-    if (typeof r.uuid === "string" && typeof r.sessionId === "string" && r.uuid && r.sessionId) {
+    if (typeof r.uuid !== "string" || !r.uuid) continue;
+    if (typeof r.sessionId === "string" && r.sessionId) {
       targets.push({ uuid: r.uuid, sessionId: r.sessionId });
+    } else if (c.action === "mute") {
+      // Couper un micro vise la personne, tous ses onglets : pas besoin de connaître l'onglet.
+      targets.push({ uuid: r.uuid, sessionId: "" });
     }
   }
   if (targets.length === 0) return null;
@@ -133,6 +143,7 @@ export function parseAdminCommand(value: unknown): AdminCommand | null {
     zone: typeof c.zone === "string" ? c.zone : null,
     note: typeof c.note === "string" ? c.note.slice(0, 140) : undefined,
     by: typeof c.by === "string" ? c.by : "",
+    byUuid: typeof c.byUuid === "string" ? c.byUuid : undefined,
     at: c.at,
   };
 }
@@ -209,7 +220,7 @@ export type AckKind = "message" | "summon";
  * read : message lu. accepted : la personne vient. declined : pas maintenant.
  * denied : la personne n'a pas les droits pour aller à cet endroit.
  */
-export type AckAction = "read" | "accepted" | "declined" | "denied";
+export type AckAction = "read" | "accepted" | "declined" | "denied" | "muted";
 
 /** Réponse envoyée à l'admin quand la personne clique sur la notification. */
 export interface AdminAck {
@@ -252,12 +263,17 @@ export function isAdminAck(v: unknown): v is AdminAck {
     typeof a.id === "string" &&
     typeof a.fromName === "string" &&
     (a.kind === "message" || a.kind === "summon") &&
-    (a.action === "read" || a.action === "accepted" || a.action === "declined" || a.action === "denied")
+    (a.action === "read" ||
+      a.action === "accepted" ||
+      a.action === "declined" ||
+      a.action === "denied" ||
+      a.action === "muted")
   );
 }
 
 /** Phrase affichée à l'admin quand la personne a répondu. */
 export function ackText(a: Pick<AdminAck, "kind" | "action" | "fromName">): string {
+  if (a.action === "muted") return `Le micro de ${a.fromName} a été coupé.`;
   if (a.action === "denied") return `${a.fromName} n'a pas accès à cet endroit.`;
   if (a.action === "declined") return `${a.fromName} ne peut pas te rejoindre pour l'instant.`;
   if (a.action === "accepted") return `${a.fromName} te rejoint.`;
