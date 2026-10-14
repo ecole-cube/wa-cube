@@ -25,9 +25,9 @@ WA.onInit().then(() => {
     initTagColors().catch(e => console.error("[couleurs]", e));
 
     // Liste des tags autorisés à traverser (basée sur votre script)
-    // "admin" (admins WorkAdventure) passe partout.
-    const authorizedTags = ["premium", "admin"];
-    const authorizedTagsEntrance = ["member", "premium", "admin"];
+    // "admin" (admins WorkAdventure) et "staff" (équipe) passent partout.
+    const authorizedTags = ["premium", "staff", "admin"];
+    const authorizedTagsEntrance = ["member", "premium", "staff", "admin"];
 
     // Vérifier si l'utilisateur possède au moins un des tags
     const hasAuthorizedTag = authorizedTags.some(tag => userTags.includes(tag));
