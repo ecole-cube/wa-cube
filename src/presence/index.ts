@@ -402,9 +402,14 @@ export function initPresence(): void {
       // L'admin amène la personne à lui. Jamais plus loin que ses droits ne le permettent à pied.
       const x = cmd.x ?? 0;
       const y = (cmd.y ?? 0) + 32;
-      if (!canEnterAt(WA.player.tags ?? [], x, y)) return;
+      if (!canEnterAt(WA.player.tags ?? [], x, y)) {
+        // L'admin le sait : « X n'a pas accès à cet endroit ».
+        sendAck(cmd.byUuid, cmd.id, "summon", "denied");
+        return;
+      }
       WA.player
         .teleport(x, y)
+        .then(() => sendAck(cmd.byUuid, cmd.id, "summon", "accepted"))
         .then(() =>
           showNotification(
             {
