@@ -31,6 +31,7 @@ import {
   AckAction,
   AckKind,
   AdminAck,
+  AdminMessage,
   PRESENCE_EVENTS,
   PRESENCE_SPACE,
   PRESENCE_SPACE_FILTER,
@@ -226,10 +227,51 @@ function initModerationMenu(): void {
 
   trackBubble();
 
-  const actions = new Map<number, { remove(): void }>();
+  const actions = new Map<number, { remove(): void }[]>();
+  const unlockAskedAt = new Map<string, number>();
   WA.ui.onRemotePlayerClicked.subscribe((remote) => {
-    actions.get(remote.playerId)?.remove();
-    const action = remote.addAction("Modération", async () => {
+    actions.get(remote.playerId)?.forEach((a) => a.remove());
+    const list: { remove(): void }[] = [];
+
+    // Une bulle verrouillée ne se déverrouille pas par script : on demande poliment à la personne.
+    list.push(
+      remote.addAction("Demander de déverrouiller", async () => {
+        const feedback = (text: string) =>
+          showNotification(
+            { kind: "ack", id: newId(), fromName: "Modération", text },
+            ACK_AUTO_CLOSE_MS,
+          ).catch((e) => console.warn("[modération] retour impossible", e));
+        const target = roleOf(remote.uuid);
+        if (target && !canModerate(myRole, target)) {
+          feedback("Tu ne peux pas viser cette personne.");
+          return;
+        }
+        const last = unlockAskedAt.get(remote.uuid) ?? 0;
+        if (Date.now() - last < 30_000) {
+          feedback(`La demande a déjà été envoyée à ${remote.name}.`);
+          return;
+        }
+        unlockAskedAt.set(remote.uuid, Date.now());
+        const payload: AdminMessage = {
+          v: PRESENCE_VERSION,
+          id: newId(),
+          fromUuid: WA.player.uuid ?? "",
+          to: remote.uuid,
+          fromName: WA.player.name,
+          text: "Un membre de l'équipe souhaite rejoindre ta bulle. Peux-tu la déverrouiller avec le cadenas ? Merci.",
+          moderation: true,
+        };
+        try {
+          await WA.event.broadcast(PRESENCE_EVENTS.message, payload);
+          feedback(`Demande envoyée à ${remote.name}.`);
+        } catch (e) {
+          console.warn("[modération] demande non envoyée", e);
+          feedback("La demande n'a pas pu partir. Réessaie.");
+        }
+      }),
+    );
+
+    list.push(remote.addAction("Modération", async () => {
       try {
         // Les mêmes personnes que dans la "Liste des participants" de la bulle, hors staff et admins.
         const around = [...bubble.values()].filter((p) => {
@@ -253,8 +295,8 @@ function initModerationMenu(): void {
       } catch (e) {
         console.warn("[modération] ouverture impossible", e);
       }
-    });
-    actions.set(remote.playerId, action);
+    }));
+    actions.set(remote.playerId, list);
   });
 }
 
