@@ -59,10 +59,13 @@ async function refresh(): Promise<void> {
       url,
       allowApi: true,
       visible: true,
+      // En bas, au centre, juste à droite de la pastille « Cowork » (centrée, 220 px de large) :
+      // en cowork, le staff voit les deux côte à côte. Rien ne recouvre les boutons natifs
+      // (barre du haut, chat à gauche, zoom en bas à droite).
       position: { vertical: "bottom", horizontal: "left" },
       // Taille ajustée ensuite par la page elle-même (déplié, replié, nombre de personnes).
       size: { width: "270px", height: "200px" },
-      margin: { bottom: "14px", left: "14px" },
+      margin: { bottom: "14px", left: "calc(50% + 130px)" },
     });
   })().finally(() => {
     opening = null;
