@@ -24,6 +24,9 @@ type UIWebsite = Awaited<ReturnType<typeof WA.ui.website.open>>;
 const bubble = new Map<number, { uuid: string; name: string }>();
 let site: UIWebsite | null = null;
 let opening: Promise<void> | null = null;
+/** La personne a masqué la liste : elle revient à l'entrée dans une bulle, ou par le menu du jeu. */
+let hidden = false;
+const HIDDEN_VARIABLE = "bulleMasquee";
 
 /** Participants à viser : tout le monde dans ma conversation, sauf moi, le staff et les admins. */
 function targets(): { uuid: string; name: string }[] {
@@ -42,7 +45,7 @@ function urlFor(list: { uuid: string; name: string }[]): string {
 
 async function refresh(): Promise<void> {
   const list = targets();
-  if (list.length === 0) {
+  if (hidden || list.length === 0) {
     const current = site;
     site = null;
     await current?.close().catch(() => undefined);
@@ -64,7 +67,7 @@ async function refresh(): Promise<void> {
       // (barre du haut, chat à gauche, zoom en bas à droite).
       position: { vertical: "bottom", horizontal: "left" },
       // Taille ajustée ensuite par la page elle-même (déplié, replié, nombre de personnes).
-      size: { width: "270px", height: "200px" },
+      size: { width: "350px", height: "220px" },
       margin: { bottom: "14px", left: "calc(50% + 130px)" },
     });
   })().finally(() => {
@@ -77,6 +80,33 @@ async function refresh(): Promise<void> {
 export function initBubbleModeration(): void {
   const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
   if (myRole !== "admin" && myRole !== "staff") return;
+
+  const setHidden = (value: boolean) => {
+    hidden = value;
+    WA.player.state
+      .saveVariable(HIDDEN_VARIABLE, value, { public: false, persist: false })
+      .catch((e) => console.warn("[modération] état de la liste", e));
+  };
+
+  // Le bouton « Masquer » de la page écrit cette variable ; le script ferme alors le cadre.
+  try {
+    WA.player.state.onVariableChange(HIDDEN_VARIABLE).subscribe((value) => {
+      hidden = value === true;
+      void refresh();
+    });
+  } catch (e) {
+    console.warn("[modération] masquage indisponible", e);
+  }
+
+  // Rouvrir à tout moment par le menu de WorkAdventure (en haut à droite).
+  try {
+    WA.ui.registerMenuCommand("Liste de ma bulle", () => {
+      setHidden(false);
+      void refresh();
+    });
+  } catch (e) {
+    console.warn("[modération] entrée de menu indisponible", e);
+  }
 
   const add = (p: { playerId: number; uuid: string; name: string }) => {
     if (p.uuid) bubble.set(p.playerId, { uuid: p.uuid, name: p.name });
@@ -93,6 +123,8 @@ export function initBubbleModeration(): void {
 
   try {
     WA.player.meetings.onJoin().subscribe((meeting) => {
+      // Nouvelle bulle ou nouvelle salle : la liste revient.
+      setHidden(false);
       bubble.clear();
       meeting.participants.forEach((p) => bubble.set(p.playerId, { uuid: p.uuid, name: p.name }));
       void refresh();
@@ -106,6 +138,7 @@ export function initBubbleModeration(): void {
   try {
     // Ancienne API des bulles de proximité, au cas où meetings ne les remonte pas.
     WA.player.proximityMeeting.onJoin().subscribe((users) => {
+      setHidden(false);
       bubble.clear();
       users.forEach((u) => bubble.set(u.playerId, { uuid: u.uuid, name: u.name }));
       void refresh();
