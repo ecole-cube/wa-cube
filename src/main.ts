@@ -72,10 +72,11 @@ WA.onInit().then(() => {
 
     // Boutons "Partager" (invitation) : celui de la barre d'actions ET celui de la liste des
     // personnes du panneau de gauche dépendent du même réglage de WorkAdventure, ils
-    // disparaissent donc ensemble. L'invitation passe par le bouton "Inviter" de la
-    // page Plan & FAQ (staff et admin).
+    // disparaissent donc ensemble. Masqués pour les apprenants ; le staff et les admins les
+    // gardent, car la fenêtre native liste tous les liens d'arrivée (points d'entrée nommés).
     try {
-        WA.controls.disableInviteButton();
+        const isTeam = userTags.includes("staff") || userTags.includes("admin");
+        if (!isTeam) WA.controls.disableInviteButton();
     } catch (e) {
         console.warn("[partager] bouton non masqué", e);
     }
