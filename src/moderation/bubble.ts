@@ -4,7 +4,7 @@ import { roleOf } from "../presence";
 import { roleFromTags } from "../presence/protocol";
 
 /* =========================================================
-   Modération depuis la bulle (staff et admins)
+   Modération depuis la bulle (staff, hors admins)
    ---------------------------------------------------------
    Quand on est dans une bulle ou une salle de réunion avec d'autres personnes, la liste des
    participants s'affiche en bas à gauche avec leur nombre : « Couper le micro » par personne et
@@ -76,10 +76,12 @@ async function refresh(): Promise<void> {
   await opening;
 }
 
-/** À appeler une fois, après WA.onInit(). Sans effet pour les autres comptes que staff et admin. */
+/** À appeler une fois, après WA.onInit(). Sans effet pour tout compte qui n'est pas staff, admins compris. */
 export function initBubbleModeration(): void {
+  // Réservée au staff. Un admin (même s'il porte aussi le tag staff) a déjà le menu natif de
+  // WorkAdventure sur les vignettes : roleFromTags donne "admin" avant "staff".
   const myRole = roleFromTags(WA.player.tags ?? [], WA.player.isLogged === true);
-  if (myRole !== "admin" && myRole !== "staff") return;
+  if (myRole !== "staff") return;
 
   const setHidden = (value: boolean) => {
     hidden = value;
