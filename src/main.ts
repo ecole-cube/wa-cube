@@ -10,7 +10,8 @@ import { initArrival } from "./arrival";
 import { initCowork } from "./cowork";
 import { initDiagnostics } from "./diagnostics";
 import { initRoofs } from "./roofs";
-import { initAabRoom } from "./aab";
+import { initAccessRules } from "./accessRules";
+import { initRestrictedAreas } from "./restricted";
 
 console.info('Script started successfully');
 
@@ -68,8 +69,9 @@ WA.onInit().then(() => {
     initPresence();
     // Toits : remis d'équerre après une téléportation (les entrées de zone ne sont pas toujours signalées).
     initRoofs();
-    // Salle AI Automation Builder : staff et tag aab seulement.
-    initAabRoom();
+    // Droits des lieux : règles modifiables depuis l'onglet Admin du site, et contrôle des lieux restreints.
+    initAccessRules();
+    initRestrictedAreas();
     try {
         initBubbleModeration();
     } catch (e) {
