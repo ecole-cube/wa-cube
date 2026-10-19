@@ -10,6 +10,7 @@ import { initArrival } from "./arrival";
 import { initCowork } from "./cowork";
 import { initDiagnostics } from "./diagnostics";
 import { initRoofs } from "./roofs";
+import { initAabRoom } from "./aab";
 
 console.info('Script started successfully');
 
@@ -67,6 +68,8 @@ WA.onInit().then(() => {
     initPresence();
     // Toits : remis d'équerre après une téléportation (les entrées de zone ne sont pas toujours signalées).
     initRoofs();
+    // Salle AI Automation Builder : staff et tag aab seulement.
+    initAabRoom();
     try {
         initBubbleModeration();
     } catch (e) {

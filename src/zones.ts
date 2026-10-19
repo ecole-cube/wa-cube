@@ -45,13 +45,15 @@ export function zoneAt(x: number, y: number): string | null {
    Dans le doute (lieu inconnu), on exige premium.
    ========================================================= */
 
-export type AccessLevel = "public" | "membre" | "premium" | "staff";
+export type AccessLevel = "public" | "membre" | "premium" | "staff" | "aab";
 
 const LEVEL_TAGS: Record<AccessLevel, readonly string[] | null> = {
   public: null,
   membre: ["member", "premium"],
   premium: ["premium"],
   staff: ["staff"],
+  // Salle AI Automation Builder : staff et élèves de la formation (tag aab) seulement. Le tag premium ne suffit pas.
+  aab: ["aab"],
 };
 
 /** Zones à accès plus ouvert que "premium", de la plus précise à la plus large. */
@@ -68,9 +70,13 @@ const OPEN_ZONES: { x: number; y: number; w: number; h: number; level: AccessLev
 ];
 
 /** Niveau d'accès nécessaire pour se trouver à ce point de la carte. */
+/** Salle AI Automation Builder (même rectangle que ZONES). */
+export const AAB_ROOM = { x: 3744, y: 2368, w: 416, h: 400 };
+
 export function accessAt(x: number, y: number): AccessLevel {
   const inside = (z: { x: number; y: number; w: number; h: number }) =>
     x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h;
+  if (inside(AAB_ROOM)) return "aab";
   // Staff : un peu plus bas que le cadre de la zone, pour inclure son point de téléportation (592, 2000).
   if (inside({ x: 346, y: 1240, w: 462, h: 820 })) return "staff";
   const open = OPEN_ZONES.find(inside);
@@ -84,7 +90,9 @@ export function tagsAllow(level: AccessLevel, tags: readonly string[]): boolean 
   // L'équipe (staff) et les admins passent partout, sans avoir besoin du tag premium.
   if (tags.includes("admin") || tags.includes("staff")) return true;
   const allowed = LEVEL_TAGS[level];
-  return allowed === null || allowed.some((t) => tags.includes(t));
+  if (allowed === null) return true;
+  const mine = tags.map((t) => t.toLowerCase());
+  return allowed.some((t) => mine.includes(t));
 }
 
 /** Cette personne peut-elle se trouver à (x, y) ? */
@@ -101,7 +109,15 @@ export function accessRule(level: AccessLevel): string {
       return "aux membres (compte member ou premium)";
     case "staff":
       return "à l'équipe";
+    case "aab":
+      return "aux élèves en formation AI Automation Builder";
     default:
       return "à tous";
   }
+}
+
+/** Phrase à montrer à quelqu'un qui n'a pas accès (« Vous devez être en formation… »). */
+export function accessDenied(level: AccessLevel): string {
+  if (level === "aab") return "Vous devez être en formation AI Automation Builder pour entrer.";
+  return `Cet endroit est réservé ${accessRule(level)}.`;
 }
