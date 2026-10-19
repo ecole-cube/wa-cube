@@ -13,6 +13,28 @@ import { accessAt, accessRule, canEnterAt, zoneAt } from "./zones";
 
 /** Paramètre du fragment d'adresse : "goto=1200,3400". */
 const GOTO_PARAM = "goto";
+/**
+ * Lieux nommés : un lien  <adresse du campus>#salle-3  amène la personne à cet endroit, sans zone « point
+ * d'entrée » à créer dans le map editor. Mêmes noms que ENTRY_POINTS du site (campus-links.ts) et mêmes
+ * positions que les téléportations du plan (DESTINATIONS de wa.ts). showroom, salle-de-conferences… ont leur
+ * vrai point d'entrée dans la carte et ne sont pas ici.
+ */
+const PLACES: Record<string, { x: number; y: number }> = {
+  "salle-1": { x: 1600, y: 960 },
+  "salle-2": { x: 2272, y: 960 },
+  "salle-3": { x: 2944, y: 960 },
+  "salle-4": { x: 3616, y: 960 },
+  "salle-5": { x: 4288, y: 960 },
+  "salle-6": { x: 4960, y: 960 },
+  "salle-7": { x: 5232, y: 1456 },
+  "salle-ai-automation": { x: 3904, y: 2560 },
+  agora: { x: 2944, y: 2144 },
+  cowork: { x: 2456, y: 1580 },
+  terrasse: { x: 5650, y: 1700 },
+  "devant-le-campus": { x: 3200, y: 2850 },
+  staff: { x: 592, y: 2000 },
+};
+
 /** Où l'on reste quand l'endroit est refusé : devant l'arche d'entrée. */
 const ENTRANCE = { x: 3200, y: 4160 };
 
@@ -47,7 +69,8 @@ export function initArrival(): void {
     const params = WA.room.hashParameters ?? {};
     if (Object.keys(params).length === 0) return; // arrivée normale : rien à contrôler
     const tags = WA.player.tags ?? [];
-    const raw = params[GOTO_PARAM];
+    const placeKey = Object.keys(params).find((k) => k in PLACES);
+    const raw = params[GOTO_PARAM] ?? (placeKey ? `${PLACES[placeKey].x},${PLACES[placeKey].y}` : undefined);
     if (raw) {
       const [x, y] = raw.split(",").map((n) => Number(n));
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
