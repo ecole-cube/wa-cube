@@ -15,10 +15,14 @@ const COUNT_URL = "https://campus-entry-cube.lovable.app/api/public/news";
 const PAGE_URL = "https://campus-entry-cube.lovable.app/nouveautes";
 const REFRESH_MS = 2 * 60_000;
 
-/** Position de la cloche : juste à droite des deux boutons du chat (à régler si besoin). */
-const BELL_LEFT = "148px";
-const BELL_TOP = "12px";
-const BELL_SIZE = "64px";
+/**
+ * Position de la cloche : sur la ligne des boutons du chat, même hauteur (62 px), juste à droite.
+ * WorkAdventure place les fenêtres de site sous la barre du haut (environ 96 px) : le haut est donc négatif
+ * pour remonter sur la ligne des boutons. À régler ici si besoin.
+ */
+const BELL_LEFT = "143px";
+const BELL_TOP = "-80px";
+const BELL_SIZE = "62px";
 
 type UIWebsite = Awaited<ReturnType<typeof WA.ui.website.open>>;
 
