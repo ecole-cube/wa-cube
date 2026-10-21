@@ -3,35 +3,19 @@
 /* =========================================================
    Cloche « Nouveautés »
    ---------------------------------------------------------
-   Une petite cloche en haut à gauche, à droite des boutons du chat, avec le nombre de nouveautés non lues.
-   Un clic ouvre la liste (page du site, fenêtre à droite) : message, vidéo, lien, et « Marquer comme lu »,
-   qui enlève la pastille. Les nouveautés lues restent consultables. Elles sont publiées depuis l'onglet
-   Admin du site (« Nouveautés (cloche) »).
+   Un bouton « 🔔 » dans la barre d'actions du haut, à droite de « Plan & FAQ » (même ligne, même hauteur : c'est
+   un bouton natif de WorkAdventure), avec le nombre de nouveautés non lues. Un clic ouvre la liste (page du site,
+   fenêtre à droite) : message, vidéo, lien, et « Marquer comme lu », qui enlève le compteur. Les nouveautés lues
+   restent consultables. Elles sont publiées depuis l'onglet Admin du site (« Nouveautés (cloche) »).
    Le compteur est relu au chargement, toutes les 2 minutes et à chaque « lu » (variable newsTick).
-   La cloche est un fichier de la carte (public/cloche.html) ; son clic passe par la variable newsOpen.
    ========================================================= */
 
 const COUNT_URL = "https://campus-entry-cube.lovable.app/api/public/news";
 const PAGE_URL = "https://campus-entry-cube.lovable.app/nouveautes";
 const REFRESH_MS = 2 * 60_000;
+const BUTTON_ID = "news-btn";
 
-/**
- * Position de la cloche : sur la ligne des boutons du chat, même hauteur (62 px), juste à droite.
- * WorkAdventure place les fenêtres de site sous la barre du haut (environ 96 px) : le haut est donc négatif
- * pour remonter sur la ligne des boutons. À régler ici si besoin.
- */
-const BELL_LEFT = "143px";
-const BELL_TOP = "-80px";
-const BELL_SIZE = "62px";
-
-type UIWebsite = Awaited<ReturnType<typeof WA.ui.website.open>>;
-
-let site: UIWebsite | null = null;
 let unread = 0;
-
-function pageUrl(): string {
-  return `${new URL("cloche.html", WA.room.mapURL).href}#n=${unread}`;
-}
 
 async function fetchUnread(): Promise<number | null> {
   const token = WA.player.userRoomToken;
@@ -50,13 +34,6 @@ async function fetchUnread(): Promise<number | null> {
   }
 }
 
-async function refresh(): Promise<void> {
-  const n = await fetchUnread();
-  if (n === null || n === unread) return;
-  unread = n;
-  if (site) site.url = pageUrl();
-}
-
 function openList(): void {
   WA.ui.modal.openModal({
     title: "Nouveautés",
@@ -69,24 +46,41 @@ function openList(): void {
   });
 }
 
+/** (Re)pose le bouton : orange avec le nombre quand il y a du non lu, sombre sinon. */
+function draw(): void {
+  try {
+    WA.ui.actionBar.removeButton(BUTTON_ID);
+  } catch {
+    /* pas encore posé */
+  }
+  WA.ui.actionBar.addButton({
+    id: BUTTON_ID,
+    label: unread > 0 ? `🔔 ${unread > 9 ? "9+" : unread}` : "🔔",
+    bgColor: unread > 0 ? "#F5821F" : "#2C2C30",
+    textColor: unread > 0 ? "#1D1D23" : "#FFFFFF",
+    toolTip: unread > 0 ? "Nouveautés non lues" : "Nouveautés",
+    callback: openList,
+  });
+}
+
+function setUnread(n: number): void {
+  if (n === unread) return;
+  unread = n;
+  draw();
+}
+
+async function refresh(): Promise<void> {
+  const n = await fetchUnread();
+  if (n !== null) setUnread(n);
+}
+
 /** À appeler une fois, après WA.onInit(). */
 export async function initNews(): Promise<void> {
-  site = await WA.ui.website.open({
-    url: pageUrl(),
-    allowApi: true,
-    visible: true,
-    position: { vertical: "top", horizontal: "left" },
-    size: { width: BELL_SIZE, height: BELL_SIZE },
-    margin: { top: BELL_TOP, left: BELL_LEFT },
-  });
-  WA.player.state.onVariableChange("newsOpen").subscribe(() => openList());
+  draw();
   // Le volet donne directement le nombre restant ; on le relit aussi sur le serveur pour confirmer.
   WA.player.state.onVariableChange("newsTick").subscribe((value) => {
     const left = (value as { unread?: unknown } | undefined)?.unread;
-    if (typeof left === "number" && left !== unread) {
-      unread = left;
-      if (site) site.url = pageUrl();
-    }
+    if (typeof left === "number") setUnread(left);
     void refresh();
   });
   void refresh();
