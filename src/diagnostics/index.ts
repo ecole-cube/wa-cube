@@ -50,6 +50,11 @@ let dirty = false;
 let lastWrite = 0;
 let lastZone: string | null | undefined;
 
+/** Évènement venu d'un autre module (ex. détection du son perdu), ajouté à la chronologie. */
+export function diagEvent(e: string, d?: Ev["d"]): void {
+  push(e, d);
+}
+
 function push(e: string, d?: Ev["d"]): void {
   const now = Date.now();
   events.push({ t: now, e, ...(d ? { d } : {}) });
