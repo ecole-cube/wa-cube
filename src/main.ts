@@ -122,7 +122,7 @@ WA.onInit().then(() => {
         });
     };
 
-    // Prototype : son perdu détecté par les autres participants (tags admin, staff, test-son).
+    // Prototype : son perdu détecté par les autres participants (tag test-son seulement).
     try {
         initSoundCheck(openPlan);
     } catch (e) {

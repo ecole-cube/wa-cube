@@ -22,8 +22,11 @@
 
 import { diagEvent } from "../diagnostics";
 
-/** Personnes qui font tourner le prototype (témoins compris). Tags lus à la connexion. */
-const PROTOTYPE_TAGS = ["admin", "staff", "test-son"];
+/**
+ * Personnes qui font tourner le prototype (témoins compris). Tags lus à la connexion.
+ * Seulement test-son : le staff et les admins ne l'ont pas sans l'avoir demandé.
+ */
+const PROTOTYPE_TAGS = ["test-son"];
 
 const SAMPLE_RATE = 8_000;
 const FRAME_MS = 250;
