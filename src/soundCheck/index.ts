@@ -92,10 +92,13 @@ function voicePct(now: number): { pct: number; frames: number } {
   return { pct: Math.round((100 * recent.filter((f) => f.voiced).length) / recent.length), frames: recent.length };
 }
 
+/** Test : avec #test-son=sourd dans l'adresse, on fait comme si on ne recevait plus aucun son. */
+let deafTest = false;
+
 function onPcm(data: Float32Array): void {
   if (!current) return;
   const acc = current.acc;
-  for (let i = 0; i < data.length; i++) acc.sumSq += data[i] * data[i];
+  if (!deafTest) for (let i = 0; i < data.length; i++) acc.sumSq += data[i] * data[i];
   acc.n += data.length;
   const frameSize = (SAMPLE_RATE * FRAME_MS) / 1000;
   if (acc.n < frameSize) return;
@@ -232,7 +235,12 @@ function isAnswer(x: unknown): x is Answer {
 /** À appeler une fois, après WA.onInit(). `openHelp` ouvre la page Plan & FAQ. */
 export function initSoundCheck(openHelp: () => void): void {
   if (!PROTOTYPE_TAGS.some((t) => WA.player.tags.includes(t))) return;
-  log("prototype actif");
+  try {
+    deafTest = WA.room.hashParameters["test-son"] === "sourd";
+  } catch {
+    deafTest = false;
+  }
+  log(deafTest ? "prototype actif, mode test sourd" : "prototype actif");
 
   WA.spaces
     .joinSpace(SPACE, "streaming", ["microphoneState"])
