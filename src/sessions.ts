@@ -11,7 +11,7 @@
    - c'est aussi ce qui sort, à la fin d'une session, ceux qui ne sont pas inscrits à la suivante ;
    - un bandeau prévient les participants 5 minutes avant la fin ;
    - vue de l'extérieur, une salle qui accueille une session (en cours ou dans moins d'une heure) est
-     entourée d'un liseré vert (vous pouvez entrer) ou rouge, avec un panneau au-dessus de la porte :
+     soulignée d'un liseré vert (vous pouvez entrer) ou rouge côté porte, avec un panneau posé dessus :
      titre, horaire, bouton S'inscrire (page /panneau-salle du site). À l'intérieur, la salle normale ;
    - pendant une session, on n'entre que par téléportation (lien de la session, bouton Rejoindre de
      l'agenda ou du panneau) : une personne qui entre à pied est remise devant la porte. Le lien ne
@@ -149,13 +149,15 @@ function announced(room: GuardRoom, now: number): GuardWindow | null {
 
 const edgeUrl = (color: string) => `${new URL("lisere.html", WA.room.mapURL).href}#c=${color}`;
 
-function edgeRects([x, y, w, h]: GuardRoom["rect"]): [number, number, number, number][] {
-  return [
-    [x - EDGE, y - EDGE, w + 2 * EDGE, EDGE],
-    [x - EDGE, y + h, w + 2 * EDGE, EDGE],
-    [x - EDGE, y, EDGE, h],
-    [x + w, y, EDGE, h],
-  ];
+/**
+ * Liseré du côté de la porte seulement (celui où se trouve le point « devant la porte ») :
+ * le reste du rectangle de la zone peut déborder sur l'herbe ou un toit.
+ */
+function edgeRects({ rect: [x, y, w, h], front }: GuardRoom): [number, number, number, number][] {
+  if (front.y >= y + h) return [[x, y + h - EDGE / 2, w, EDGE]];
+  if (front.y <= y) return [[x, y - EDGE / 2, w, EDGE]];
+  if (front.x <= x) return [[x - EDGE / 2, y, EDGE, h]];
+  return [[x + w - EDGE / 2, y, EDGE, h]];
 }
 
 /** color : couleur du liseré, ou "" pour tout cacher. */
@@ -165,17 +167,9 @@ function showOverlay(room: GuardRoom, color: string): void {
   if (!o) {
     if (!color) return;
     const p = room.panel;
+    // Le liseré d'abord : le panneau, créé ensuite, passe par-dessus le trait.
     o = {
-      panel: WA.room.website.create({
-        name: `session-panneau-${room.id}`,
-        url: `${SITE}/panneau-salle?salle=${encodeURIComponent(room.id)}`,
-        position: { x: p.x, y: p.y, width: p.width, height: p.height },
-        visible: true,
-        allowApi: true,
-        origin: "map",
-        scale: 1,
-      }),
-      edges: edgeRects(room.rect).map(([x, y, width, height], i) =>
+      edges: edgeRects(room).map(([x, y, width, height], i) =>
         WA.room.website.create({
           name: `session-lisere-${room.id}-${i}`,
           url: edgeUrl(color),
@@ -185,6 +179,15 @@ function showOverlay(room: GuardRoom, color: string): void {
           scale: 1,
         }),
       ),
+      panel: WA.room.website.create({
+        name: `session-panneau-${room.id}`,
+        url: `${SITE}/panneau-salle?salle=${encodeURIComponent(room.id)}`,
+        position: { x: p.x, y: p.y, width: p.width, height: p.height },
+        visible: true,
+        allowApi: true,
+        origin: "map",
+        scale: 1,
+      }),
       shown: color,
     };
     overlays.set(room.id, o);
